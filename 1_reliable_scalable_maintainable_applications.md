@@ -51,13 +51,15 @@ Although we prefer tolerating faults over preventing faults, sometimes preventio
 
 Until recently, redundanc of hardware components was sufficient for most applications, since it makes total failure of a single machine faily rare. As long as you can resotre a backup onto a new machine fairly quickly, the downtime in case of a failure is not catastrophic in most applications.  
 
-However, as data volumes and applications begun using larger number of machines, which proportionally increase the rate of hardware faults. Moreover, in some cloud platforms such as AWS, it is faily common for virtual machine instances to become unabilable without warning, as the platforms are designed to prioritize flexibility and elasticity over single-machine reliability  
+However now-a-days, data volumes and applications are using larger number of machines, which proportionally increase the rate of hardware faults. Moreover, in some cloud platforms such as AWS, it is faily common for virtual machine instances to become unabilable without warning, as the platforms are designed to prioritize flexibility and elasticity over single-machine reliability  
 
-Hence the move towards systems that can tolerate the loss of entire machines, by using software fault-tolerance techniques in addition to hardware redundancy. These systems have operational advantages: a system can tolerate machine failures can be patched one node at a time, without downtime of the entire system. (rolling upgrade)  
+Hence the move towards systems that can tolerate the loss of entire machines, by using software fault-tolerance techniques in addition to hardware redundancy. These systems have operational advantages: a system can tolerate machine failures can be patched one node at a time, without downtime of the entire system. (rolling upgrade). 
+
+AWS manages a lot of the hardware faults for its users and often provide guarantees in very high percentiles.
 
 #### Software Errors
 
-Software faults often are software bugs that lie dormant for a long time until they are triggered by an unusual set of circumstances. They are often cause because of assumptions are being made about its enviorment which is true until the enviorment changes changes. Some common bugs are:
+Software faults often are software bugs that lie dormant for a long time until they are triggered by an unusual set of circumstances. They are often cause because of assumptions are being made about its enviorment which is true until the enviorment changes. Some common bugs are:
 
 - Software bug that causes every instance of an application to crash when given a particular bad input
 - A runaway process that uses up some shared resource -CPU time, memory, disk space, or network bandwidth
@@ -85,7 +87,9 @@ There are situations where we choose to sacrifice reliability in order to reduce
 
 #### Scalability
 
-Scalability is the term to describe a system's ability to cope with increased load. So when a system grows from 10,000 concurrent users to 100,000 concurrent users for example. Discussing scalability means considering questions like 'If the system grows in a particular way, what are our options for coping with the growth?' and ' How an we add computing resources to handle the additional load?'
+Scalability is the term to describe a system's ability to cope with increased load. So when a system grows from 10,000 concurrent users to 100,000 concurrent users for example. Discussing scalability means considering questions like:  
+- If the system grows in a particular way, what are our options for coping with the growth?  
+- How an we add computing resources to handle the additional load?  
 
 #### Describing Load
 
@@ -104,11 +108,98 @@ Once you have described the load on your system, you can investigate what happen
 
 Both questions requre performance numbers.  
 
-In batch processing system like Hadoop, the number of records we can process per second, or the total time it takes to run a job on a dataset of a certain size is measured
-In online systems, the service's response, that is the time between a client sending a request and receiving a response is measured by looking at the distribution since the time can vary per query. It is useful to measure the median, mean(arithmetic), 95th and 99th percentile when looking at requests. Mean is a good measurement to for the typical response. Percentiles are useful if you sort them by time and then take the median point, which means half take n ms to complete, which is good to see how long a user typical user has to wait. The percentiles are important because they impact users' experence of the service.
+In batch processing system like Hadoop measure:
+- Througput: the number of records we can process per second
+- Response time: the time between a client sending a request and receiving a response
+- Total time: how long it takes to run a job on a dataset of a certain size
 
-'Amazon has also observed that a 100ms increase in response time reduces sales by 1%, and others report that a 1-second slowdown reduces a customers satisfaction metric by 16%'  
+In online systems, the service's response, that is the time between a client sending a request and receiving a response is measured by looking at the distribution since the time can vary per query. It is useful to measure the median, mean(arithmetic), 95th and 99th percentile when looking at requests.  
+- Mean is a good measurement to for the typical response
+- Percentiles are useful if you sort them by time and then take the middle point the median  
+- Median, which means half take it takes 'X' ms to complete, which is good to see how long a user typical user has to wait
+- The percentiles are important because the high levels show how a users may experence the service.  
 
-On the otherhand, the 99th percentile may be too expensive to improve and not yield enough benifits.
+- 'Amazon has also observed that a 100ms increase in response time reduces sales by 1%, and others report that a 1-second slowdown reduces a customers satisfaction metric by 16%
+- On the otherhand, the 99th percentile may be too expensive to improve and not yield enough benifits.
 
 
+#### Service level objectives(SLO) and service level agreements(SLA)
+
+Are contracts that define the expected performance and availability of a service:  
+SLA - may state a service is up if the median response time is less than 200ms and a 99th percentile under 1 second   
+If the SLA is not met, the service can be considered down, and a customer can demand a refund  
+
+#### Percentiles in practice
+
+High percentiles become important in backend services that are called multiple times as part of a serving a single end-user request. Even if the call is in parallel, the end-user will have to wait on the slowest backend service. Even if only a small percentage of backend calls are slow, the chances of getting a slow call increases if an end-user request requires mutiple back-end calls, and so a higher proportion of end-users requests end up being slow (effect is known as tail latency amplification)
+
+#### Aproaches for coping with load
+
+How do we maintain good performance even when our load parameters increase by some amount?
+
+An architecture that is appropriate for one level of load is unlikely to cope with 10 times the load. You will need to rethink your architecture on every order of magnitude load increase. Popular terms are:
+
+- Scaling up: (vertical scaling): adding more resources to an existing machine
+- Scaling out: (horizontal scaling): add more machines into your pool of resources
+- Shard nothing architecture: when a distributing load across multiple machines 
+
+A good architecture involes a pragmatic mixture of approaches. For example, using serveral fairly powerful machines can be simple and cheaper than a large number of small virtual machines.  
+
+Ways to scale:  
+- elastic: system can automatically add computing resources when they detect a load increase
+    - useful when load is highly unpredictable
+- Manual: system is analyzed and scaled manually
+    - tend to be simpler and have fewer operational surprises
+    
+It used to be that distributing a stateful data system from a single node to a distributed setup can introduce a lot of complexity. It would only be done when scaling up cost exceed or high availability requirements force you to scale out into a distributed system,
+
+AWS services makes scaling out very easy on users and is contributing to the boom in big data.
+
+There is no one-size-fits-all on scalable architectures. This is because the volume or reads, the volume of writes, the volume of data to store, the complexity of the data, the response time requirements, the access patterns, or some mixture all of these plus many more issues are not directly compatiable. For example, a system that is designed to handle 100,000 request per second, each 1 kB in size looks very different from a system that is designed for 3 requests per minute, each 2 GB in size, even though the two systems have the same data throughput.  
+
+##### Production System:  
+**An architecture is built ontop of assumptions of which operations will be common and which will be rare - the load parameters. If those assumptions turn out to be wrong, the engineering effort for scaling is at best wasted, and at worst counterproductive.** 
+
+##### Start-up System
+**In an early-stage startup or an unproven product it's usually more important to be able to iterate quickly on product features than it is to scale to some hypothetical future load.**
+
+#### Maintainability
+
+The majoirty of the cost of sotware is not in its initial development, but in its ongoing maintenance - fixing bugs, keeping its systems operational, investigating failures, adapting it to new platforms, modifying it for new use cases, repaying technical debt, and adding new features.  
+
+Yet, unfortunately, many people working on software systems dislike maintenance of so-called legacy systems-perhaps it involves fixing other people's mistakes, or working with platforms that are now outdated, or systems that were forced to do things they were never intended for. Every legacy system is unpleasant in its own way, and so it is difficult to give general recommendations for dealing with them.
+
+However, we can and should design software in such a way that it will hopefully minimize pain during maintenance, and thus avoid creating legacy software outselves. To this end, we will pay particular attention to three design principles for software systems:  
+
+- Operability: makes it easy for operation teams to keep the system running smoothly
+- Simplicity: makes it easy for new engineeers to understand the system, by removing as much complexity as possible from the system
+- Evolvability: makes it easy for engineers to make changes to the system in the future, adapting it for unanticipated uses cases as requirements change. Also know as extensibility, modifiability or plasticity
+
+There is no easy soltion for achieving these goals.  
+
+#### Operability: making life easy for operations
+
+It has been suggested that good operations can often work around the limitations of bad software, but good software cannot run reliably with bad operations. Operation teams are vital to keeping a software system running smoothly. A good operation team typically is responsible for the following and more:  
+
+- Monitoring the health of the system and quickly resoring services if it goes into a bad state
+- Tracking down the cause of problems, such as system failures or degraded performance
+- Keeping software and platforms up to date, including security patches
+- Keeping tabs on how different systems affact each other, so that a problematic change can be avoided before it causes damage
+- Anticipating future problems and solving them before they occur (capacity planning)
+- Establishing good practices and tools for deployment, configuration management, and more
+- Performing complex maintenance tasks, such as moving an application from one platform to another
+- Maintaining the security of the system as configuration changes are made
+- Defining processes that make operations predictable and help keep the production enviornment stable
+- Preserving the organization's knowledge about the system, even as individual people come and go
+
+Good operability means making routine tasks easy, allowing the operations teams to focus their effors on high-value activities. Data systems can do various things to make routine task easy, including:  
+
+- Providing visibility into the runtime behavior and internals of the system, with good monitoring
+- Providing good support for automation and integration with standard tools
+- Avoiding dependency on individual machines (allowing machines to be taken down for maintenance while the system as a whole continues running uninterrupted)
+- Providing good documentation and an easy-to-understand operational model (if I do X, Y will happen)
+- Providing good default behavior, but also giving administrators the freedom to override defaults when needed
+- Self-healing where appropriate, but also giving administrators manual control over the system state when needed
+- Exhibiting predictable behavior, minimizing surprises
+
+#### Simplicity: Mangaging Complexity
