@@ -203,3 +203,64 @@ Good operability means making routine tasks easy, allowing the operations teams 
 - Exhibiting predictable behavior, minimizing surprises
 
 #### Simplicity: Mangaging Complexity
+
+Small software projects can have simple and expressive code, but larger projects become very complex and difficult to understand. This complexity slows down everyone who needs to work on the system, further increaseing the cost of maintenance. Software projects mired in complexity is sometimes described as a *big ball of mud*.
+
+Possible symptoms of complexity:  
+- explosion of the state space
+- tight coupling of modules
+- tangled dependencies
+- inconsistent naming and terminology
+- hacks aimed at solving performance problems
+- special-casing to wrok around issues elsewhere
+- many more
+
+Complexity makes:  
+- maintenance hard with budgets
+- schedules are often overrun
+- greater risk of introducing bugs
+- harder to understand and reason about
+- has hidden assumptions
+- unintended consequences
+- unexpected interactions are more likely to be overlooked
+
+Making a system simpler does not necessarily mean reducing its functionality, it can also mean removing accidental complexity.  
+
+Tools for removing accidental complexity are good abstractions.  
+- hide a great deal of implementation detail behind a clean, simple-to-understand front-end
+- code reuse: can be used for a wide range of different applications for
+
+Good abstractions for distributed systems are hard to find and package together to keep the complexity of a system managable.  
+
+#### Evolvabilty: Making Change Easy
+
+A system will likely always be in constant flux:  
+- you learn new facts
+- previewously unanticipated use cases emerge
+- business priorities change
+- users request new features
+- new platforms replace old platforms
+- legal or regulatory requirements change
+- growth of the system forces architecture change
+- etc
+
+In terms of organizational processes, *Agile* working patterns provide a framework for adapting to change. The Agile community has developed technical tools and paterns that are helpful when developing software in a frequently changing enviornment, such as test-driven development (TDD) and refactoring. Most agile techniques focus on fairly small and local teams working on an application.  
+
+The ease at which you can modify a data system, and adapt it to changing requirements, is closely linked to its simplicity and its abstractions. This term refering to the agility on modifying a data system is called evolvability.  
+
+#### Summary
+
+An application has to meet various requirements in order to be useful. There are functional requirements (what it should do, such as allowing data to be stored, retrieved, searched, and processed in various ways), and some nonfunctional requirements (general properties like secuirty, reliability, compliance, scalability, compatibility, and maintainability). In this chapter reliability, scalability, and maintainability were discussed in detail.  
+
+Reliability means making systems work correctly, even when faults occur. Faults can be in hardware (typically random and uncorrelated), software (bugs are typically stematic and hard to deal with), and humans (who inevitably make mistakes). Fault-tolerance techniques can hide certain types of faults from the end users.  
+
+Scalability means having strategies for keeping performance good, even when load increases. in order to discuss scalability, we first need ways of describing load and performance quantitatively. We briefly looked at Twitters's home timelines as an example of describing load, and response time percentiles as a way of measuring performance. In scalable systems, you can add processing capacity in order to remain reliable under high load.  
+
+Maintainability has many facets, but in essence it is about making life better for engineering and operations teams who need to work with the system. Good abstractions can help reduce complexity and make the ststem easier to modify and adapt for new use cases. Good operability means having good visibility into the system's health, and having effective ways of managing it.  
+
+There is unfortunately no easy fix for making applications reliable, scalable, or maintainable. However, there are certain patterns and techniques that keep reappearing in different kinds of applicatinos. In the next few chaperts we will take a look at some examples of data systems and analze how they work toward those goals.  
+
+
+#### Whiteboard notes
+
+Currently at Approaches for coping with load
