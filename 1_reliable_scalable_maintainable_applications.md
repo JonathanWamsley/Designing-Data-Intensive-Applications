@@ -148,7 +148,7 @@ A good architecture involes a pragmatic mixture of approaches. For example, usin
 Ways to scale:  
 - elastic: system can automatically add computing resources when they detect a load increase
     - useful when load is highly unpredictable
-- Manual: system is analyzed and scaled manually
+- manual: system is analyzed and scaled manually
     - tend to be simpler and have fewer operational surprises
     
 It used to be that distributing a stateful data system from a single node to a distributed setup can introduce a lot of complexity. It would only be done when scaling up cost exceed or high availability requirements force you to scale out into a distributed system,
@@ -263,4 +263,11 @@ There is unfortunately no easy fix for making applications reliable, scalable, o
 
 #### Whiteboard notes
 
-Currently at Approaches for coping with load
+![part1](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%201.jpg)
+![part2](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%202.jpg)
+![part3](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%203.jpg)
+![part4](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%204.jpg)
+![part5](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%205.jpg)
+![part6](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%206.jpg)
+![part7](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%207.jpg)
+![other](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/other.jpg)
