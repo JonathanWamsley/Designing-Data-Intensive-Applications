@@ -271,3 +271,80 @@ There is unfortunately no easy fix for making applications reliable, scalable, o
 ![part6](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%206.jpg)
 ![part7](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/part%207.jpg)
 ![other](https://raw.githubusercontent.com/JonathanWamsley/Designing-Data-Intensive-Applications/master/images/other.jpg)
+
+# Transcribing Whiteboard Notes/ asking questions along the way
+
+### Why do all entry data engineering positions 'require' (2-3) years of experience in various technologies?
+
+When a data engineer(DE) designs a data-intensive application, architecture, pipeline or other similarly named systems, the DE has made assumptions about common load parameters that indicate how a system should operate and scale. If those **assumptions are wrong**, then at **best** the DE efforts are **wasted**, and at **worst** are **counter-productive.**  
+
+A business wants to hire qualified engineers because they know:  
+- good operation teams + bad software = success
+- bad operation teams + good software = failure  
+
+Maintaining and refactoring systems because of incompetency and/or technical debt is counter-productive.
+
+So it does not necessairly mean employeers want (2-3) years of experience, but it is more likely or perhaps has a correlation that those individuals that are more experience will not be counter-productive by because they have learned some good practices.   
+
+### What does a reliable, scalable and maintainable applications mean?
+
+Lets first break down each category and then we can better appretiate what this package means collectively and why it is a desirable goal.  
+
+### What is a reliable system?
+
+- A reliable system is a system that performs correctly even when faced with adversities, also called faults.  
+- A fault is when a system does not perform as expected and can lead to failures
+- a failure is when a system stops providing its intended service
+- To deal with faults we need to either create:
+    - fault resilient sytems: systems that try to anticipate faults and prevent them from occuring
+    - fault tolerant systems: prevents faults entirely which is not always possible, but nevertheless a goal in areas that deal with sensitive data (such as security) 
+  
+### Types of faults/errors
+
+- The 3 types of faults/errors which are from hardware, software and humans
+- Hardware faults: When a hardware component stops working
+- Hardware fault solution: use hardware redundancy so if a component fails, there will be a backup
+
+
+- Software errors: Are 
+    - software bugs
+    - runaway process
+    - small failures that cascade throughout a system
+    - services that has dependencies that are slowed, unresponsive or corrupted
+- Software error solution: There is no easy solution but good practices can help like:
+    - thinking about assumptions and interactions in the system
+    - thorough testing
+    - process isolation
+    - allowing processes to crash and restart
+    - measuring
+    - monitoring
+    - analyzing system behavior in production
+    
+- Human errors: When a human makes a faulty assumption in designing and building software systems in practice
+- Human error solution: Can combine serveral best practices to create reliable systems to reduce that chances of human errors such as:
+    - designing systems that minimize opportunities for error by:
+        - create good abstractions
+        - intuitive and useful API's
+        - admin accessibility to encourage use cases of applying good techniques
+    - decouple places where will tend to make mistakes that can lead to failures.
+    - create snadbox enviorments where people can experiment safely using real data without affecting the user
+    - test thoroughly at all levels applying:
+        - unit tests
+        - integration tests
+        - manual tests
+        - automatd test
+        - data integrity test
+    - Have a version control to allow quick and easy recovery from human errors
+    - set up detailed and clear monitoring which shows:
+        - early warning signals
+        - if assumptions or constraints are being violoated
+    - implementing good management practices and training
+    
+### The tradeoffs of a reliable system
+
+Faults/errors in business application cause major lost in productivity which can have huge cost in terms of lost revenue and damage to a companies reputation.  
+
+There is a balance though, because an overprotected system are more costly and do not make sense in prototype situations or when there is a narrow profit margin. 
+
+
+### What is scalability?
