@@ -348,3 +348,62 @@ There is a balance though, because an overprotected system are more costly and d
 
 
 ### What is scalability?
+
+Scalability defines how easy it is for a system to cope to adjustinging due a change in load. It is useful to ask:
+- if the system stays the same, how will the system perform with an increase load?
+- if the system wants to continue working with an increase load, what computing resources can be added to handle the additional load?
+
+In order to create a system that can cope with load, metrics about describing the load are needed to understand how the system will perform in a given situation.
+
+### Describing the scalability workflow
+
+1. first understanding the current state on how the system handles load
+    - this means gathering good numerics relevant to describing load through load parameters which may be:
+        - requests per second
+        - ratio of reads to writes in a database
+        - number of simulatneously active users
+        - hit rate on a cache
+        - some aggregate function
+        - etc
+2. once load parameters are collected, then experiments on how the system is affected by an increase in load at specific quantities
+    - Observe load performance by asking:
+        - if the system stays the same, how will the system perform with an increase load? 
+        - if the system is to continue working with an increase load, what computing resources can be added to handle the additional load?
+3. to interpret the performance of a system, you need to quantify the performance results:
+    - in batch processing measuring metrics like over another quantity like time:
+        - throughput: number of records processed per second (actions / time)
+        - total time to run a job on a dataset of a certain size (time/data quantity)
+    - in online systems measuring metrics are more less consistent thus require probabilistic interprability
+        - response time: the time between a client sending a request and receiving a response (response time = service time + latency)
+            - results can vary and frequency charts are made to better understand the data by collecting metrics such as:
+                - mean: average use case
+                - median: the 50/50 line use case
+                - 95th percentile: with multiple request calls, tail latencies amplifications are created, and the slowest request describes the the performance felt
+                - 99th percentile: at some point the it may not be worth performance tuning your system because of cost
+        - it is useful to define SLO and SLA to know how the system handles variabity and to log if the system is working at intended
+            - Service Level Objectives
+            - Service Level Agreements
+4. now the scalability parameters of your system can be addressed once the load parameters and the performance metrics are made
+    - The common approaches are:
+        - scale up (vertical scaling): adding more compute resources to the current machine
+        - scale out (horizontal scaling): distributing the load across mutiple machines
+            - in reality, a mixture of both are used since it is more cost effective
+        - elastic scaling: scalying automatically increases and decreases. (AWS load balancer does this where you pay what you need/use)
+    - There is no magic scaling, and depending on the problems parameters will require a unique architecture solution
+    - Do research:
+        - find similiar problems to the one your system is facing
+        - understand why they architected their system in such a way
+        - ask if that same reasoning applies to your system too
+        - repeat cycle
+5. discussions about choosing the right architecture solution with your team members
+    - present your scalability problem in terms of:
+        - current metrics -> current performance -> user experience
+        - anticipated metrics if the system **does not change**-> anticipated performance -> user experiences (does this meet business, SLO or SLA standards?)
+        - anticipated metrics if the system **does changes**   -> anticipated performance -> user experiences (difference in models)
+        - we beleive we can achieve better scalability using x implementation based on research conducted 
+        
+        
+        
+### What is Maintainability
+
+
