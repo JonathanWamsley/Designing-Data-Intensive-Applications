@@ -276,15 +276,15 @@ There is unfortunately no easy fix for making applications reliable, scalable, o
 
 ### Why do all entry data engineering positions 'require' (2-3) years of experience in various technologies?
 
-When a data engineer(DE) designs a data-intensive application, architecture, pipeline or other similarly named systems, the DE has made assumptions about common load parameters that indicate how a system should operate and scale. If those **assumptions are wrong**, then at **best** the DE efforts are **wasted**, and at **worst** are **counter-productive.**  
+When a data engineer(DE) designs a data-intensive application, architecture, pipeline or other similarl systems, the DE has made assumptions about common load parameters that indicate how a system should operate and scale. If those **assumptions are wrong**, then at **best** the DE efforts are **wasted**, and at **worst** are **counter-productive.**  
 
-A business wants to hire qualified engineers because they know:  
+A business wants to hire qualified engineers because:  
 - good operation teams + bad software = success
 - bad operation teams + good software = failure  
 
 Maintaining and refactoring systems because of incompetency and/or technical debt is counter-productive.
 
-So it does not necessairly mean employeers want (2-3) years of experience, but it is more likely or perhaps has a correlation that those individuals that are more experience will not be counter-productive by because they have learned some good practices.   
+So it does not necessairly mean employeers want (2-3) years of experience, but it is more likely or perhaps has a correlation that those individuals that are more experience will not be counter-productive because they have learned some good practices.   
 
 ### What does a reliable, scalable and maintainable applications mean?
 
@@ -301,17 +301,19 @@ Lets first break down each category and then we can better appretiate what this 
   
 ### Types of faults/errors
 
-- The 3 types of faults/errors which are from hardware, software and humans
+The 3 types of faults/errors are from hardware, software and humans  
+
+##### Hardware Faults
 - Hardware faults: When a hardware component stops working
 - Hardware fault solution: use hardware redundancy so if a component fails, there will be a backup
 
-
-- Software errors: Are 
+##### Software Faults
+- Software faults/errors: Are 
     - software bugs
     - runaway process
     - small failures that cascade throughout a system
     - services that has dependencies that are slowed, unresponsive or corrupted
-- Software error solution: There is no easy solution but good practices can help like:
+- Software faults/error solution: There is no easy solution but good practices can help like:
     - thinking about assumptions and interactions in the system
     - thorough testing
     - process isolation
@@ -320,8 +322,9 @@ Lets first break down each category and then we can better appretiate what this 
     - monitoring
     - analyzing system behavior in production
     
-- Human errors: When a human makes a faulty assumption in designing and building software systems in practice
-- Human error solution: Can combine serveral best practices to create reliable systems to reduce that chances of human errors such as:
+##### Human Faults:    
+- Human faults/errors: When a human makes a faulty assumption in designing and building software systems in practice
+- Human faults/error solution: Can combine serveral best practices to create reliable systems to reduce that chances of human errors such as:
     - designing systems that minimize opportunities for error by:
         - create good abstractions
         - intuitive and useful API's
@@ -349,13 +352,11 @@ There is a balance though, because an overprotected system are more costly and d
 
 ### What is scalability?
 
-Scalability defines how easy it is for a system to cope to adjustinging due a change in load. It is useful to ask:
-- if the system stays the same, how will the system perform with an increase load?
-- if the system wants to continue working with an increase load, what computing resources can be added to handle the additional load?
+Scalability defines how easy it is for a system to cope and adjust due to a change in load.  
 
 In order to create a system that can cope with load, metrics about describing the load are needed to understand how the system will perform in a given situation.
 
-### Describing the scalability workflow
+### Understanding the scalability workflow
 
 1. first understanding the current state on how the system handles load
     - this means gathering good numerics relevant to describing load through load parameters which may be:
@@ -370,7 +371,7 @@ In order to create a system that can cope with load, metrics about describing th
         - if the system stays the same, how will the system perform with an increase load? 
         - if the system is to continue working with an increase load, what computing resources can be added to handle the additional load?
 3. to interpret the performance of a system, you need to quantify the performance results:
-    - in batch processing measuring metrics like over another quantity like time:
+    - in batch processing measuring metrics over another quantitative metric like:
         - throughput: number of records processed per second (actions / time)
         - total time to run a job on a dataset of a certain size (time/data quantity)
     - in online systems measuring metrics are more less consistent thus require probabilistic interprability
@@ -378,32 +379,81 @@ In order to create a system that can cope with load, metrics about describing th
             - results can vary and frequency charts are made to better understand the data by collecting metrics such as:
                 - mean: average use case
                 - median: the 50/50 line use case
-                - 95th percentile: with multiple request calls, tail latencies amplifications are created, and the slowest request describes the the performance felt
-                - 99th percentile: at some point the it may not be worth performance tuning your system because of cost
-        - it is useful to define SLO and SLA to know how the system handles variabity and to log if the system is working at intended
-            - Service Level Objectives
-            - Service Level Agreements
+                - 95th percentile: with multiple request calls, tail latencies amplifications are created, and the slowest request describes how the performance is felt
+                - 99th percentile: at some point altering the systems capacities may not be worth performance tuning because of cost
+        - it is useful to define SLO and SLA to know how the system handles variabity and to log if the system is working as intended
+            - Service Level Objectives (SLO)
+            - Service Level Agreements (SLA)
 4. now the scalability parameters of your system can be addressed once the load parameters and the performance metrics are made
     - The common approaches are:
         - scale up (vertical scaling): adding more compute resources to the current machine
         - scale out (horizontal scaling): distributing the load across mutiple machines
             - in reality, a mixture of both are used since it is more cost effective
-        - elastic scaling: scalying automatically increases and decreases. (AWS load balancer does this where you pay what you need/use)
-    - There is no magic scaling, and depending on the problems parameters will require a unique architecture solution
+        - elastic scaling: scalying automatically (increase/decrease) resources. (AWS load balancer does this where you pay what you need to use)
+5. there is no magic scaling, and depending on the problems parameters will require a unique architecture solution
     - Do research:
         - find similiar problems to the one your system is facing
         - understand why they architected their system in such a way
         - ask if that same reasoning applies to your system too
         - repeat cycle
-5. discussions about choosing the right architecture solution with your team members
-    - present your scalability problem in terms of:
+6. discussions about choosing the right architecture solution with your team members
+    - present your scalability problem in a template as:
+        1. current problem
+        2. metrics to support the clause
+        3. affects on the end user
+        4. proposed solution
+        5. anticipated metrics with the change
+        6. user experience
+    - example:
         - current metrics -> current performance -> user experience
         - anticipated metrics if the system **does not change**-> anticipated performance -> user experiences (does this meet business, SLO or SLA standards?)
         - anticipated metrics if the system **does changes**   -> anticipated performance -> user experiences (difference in models)
-        - we beleive we can achieve better scalability using x implementation based on research conducted 
+        - we beleive we can achieve better scalability using x implementation based on research conducted (though it is not a one-dimensional problem)
         
         
         
 ### What is Maintainability
 
+Maintainability defines how easy and productive operators are in sustaining the system as well as adapting to new changes. 
+
+Maintaining a system is the main source of software costs, not initial developement on a system. It is also one of the more disliked parts of the job because of the lack of organizations and planning.   
+
+There however and certain designs and good practices that can help aleviate some common software engineering pains. The developers working on the system should be mindful of other current and future devs by creating a system that is:
+1. Operability: easy to maintain
+2. Simplicity:  easy to learn and understand 
+3. Evolvability:easy to make changes to a system
+
+### Operators are responsibilities
+
+Operators are responsible for keeping the software system running and may have to:  
+- monitor the system
+    - creating test and monitoring them where you anticipate problems to occur
+    - being able to categorize different statuses and labeling or logging them
+    - monitor how different systems interact with each other
+- responding to unwanted monitor reports
+    - quickly restore the system if it is not working as intended
+    
+- maintain maintainance
+    - keeping software and platforms up to date
+    - moving an application from one platform to another
+    - maintaining security of the system
+- create tests
+    - unit test
+    - integration test
+    - data integrity test
+    - manual test
+    - automated test
+- document a system
+    - establish good practives and tools for deployment and configuration management
+    - create easy to use API's
+    - create intuitive abstractions when possible
+        - creating good abstractions leads to removing accidental complexity
+        - good abstractions hide complexity, allows for code reuse and leads to higher quality code
+    - establish formating conventions so the team knows how to:
+        - package
+        - test
+        - comment/ docstrings
+        - name
+        - etc
+   
 
