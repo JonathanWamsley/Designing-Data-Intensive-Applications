@@ -65,7 +65,7 @@ The one-to-many relationships from the user profile to the user's positions, edu
 In the preceding section, region_id and industry_id are given as Ids, not as plain text strings "Greater Seattle Area" and "Philanthropy". Why?  
 
 If the user interface has free-text fields for entering the region and the industry, it makes sense to store them as plain-text strings. But there are advantages to having standaraized lists of geographic regions and industries, and letting users choose from a drop-down list or autocompleter:  
-- consistent tyle and spelling across profiles
+- consistent style and spelling across profiles
 - avoid ambiguity (if there are several cities with the same name)
 - ease of updating- the name is stored in only one place, so it is easy to update across the board if it ever needs to be changed
 - localization support - when the site is translated into other languages, the standardized lists can be localized, so the region and industry can be displayed in the viewer's language
@@ -107,7 +107,47 @@ Query optimizers for relational databases are complicated beasts, and they have 
 
 ### Comparison to document databases
 
-Document databases reverted back to the hierachial model in storing nested records. When it comes to representing many-to-one and many-to-many relationships, relational and document databases are not fundamentally different: in both cases, the related item is referenced by a umique identifier, which is called a foriegn key in a relational mode and a document referenece in a document model. That identifier is resolved at read time by using a join or follow-up query.  
+Document databases reverted back to the hierachial model in storing nested records. When it comes to representing many-to-one and many-to-many relationships, relational and document databases are not fundamentally different: in both cases, the related item is referenced by a unique identifier, which is called a foriegn key in a relational mode and a document referenece in a document model. That identifier is resolved at read time by using a join or follow-up query.  
 
 ### Relational Versus Document Databases Today
+
+The main arguments in favor of the document data model are schema flexibility, better performance due to locality, and that for some applications it is closer to the data structures used by the application. The relational model counters by providing better support for joins and many-to-one and many-to-many relationships.  
+
+### Which data model leads to simpler application code?  
+
+If the data is your application has a document-like structure (i.e., a tree of one-to-many relationships, where typically the entire tree is loaded at once), then its probabily a good idea to use a document model. The relational technique of shredding- splitting a document-like structure into multiple tables (like position, education, and contact_info) can lead to cumbersome schemas and unnecessarily complicated application code.  
+
+The document model has its limitations: you cannot refer directly to a nested item with a document, but instead you need to say something like "the second item of osition for user 251". However, as long as documents are not too deeply nested, that is not usually a problem. If your application does use many-to-many relationships, the document model becomes less appealing. 
+
+### Schema flexibility
+
+Most document databases, and the JSON support in relational databases, do not enforce any schema on the data in documents. XML support in relational databases usually comes with optional schema validation. No schema means that arbitrary keys and values can be added to a document, and when reading, cllients have no guarantees as to what fields the documents may contains.  
+
+Document databases are sometimes called *schemaless*, but that is misleading, as the code that reads the data usually assumes some kind of structure, there is an implicit schema, but it is not enforced by the database. A more accurate term is *schema-on-read* (the structure of the data is implicit, and only interpreted when the data is read), in contrast with *schema-on-write* (the traditional approach of relational databases where the schema is explicit and the database ensures all written data conforms to it).  
+
+Schema-on-read is similar to dynamic type checking in programming languages, whereas schema-on-write is similar to static type checking. Just as the advocates of static and dynamic type checking have big debates about their relative merits, enforeent of schemas in database is contentiuos topic, and in general there is no right or wrong answer.  
+
+The difference between the approaches is particularly notiable in situations where an application wants to change the format of its data. For example, say you are currently storing each user's full name in one field, and you instead want to store that first name and last name separarately. In a document database, you would just start writing new documents with the new fields and have code in the application that handles the case when old documents are read. For example:  
+
+> if (user && user.name && !user.first_name) {  
+>    // Document written before Dec 8, 2013 don't have first_name  
+>    user.first_name = user.name.split(" ")[0]  
+> }  
+
+On the other hand, in a "statically typed" database schema, you would typically perform a migration along the lines of:
+
+> ALTER TABLE users ADD COLUMN first_name text;  
+> UPDATE users SET first_name = split_part(name, ' ', 1); --PostgresSQL  
+
+Schema changes have a bad reputation of being slow and requiring downtime. This reputation is not entirely deserved: most relational databases systems execute the ALTER TABLE statement in a few miliseconds.  
+
+Running the UPDATE statement on a large table is likely to be a slow on any database, since every row needs to be rewritten. If that is not acceptable, The application can leave first_name set to its default of NULL and fill it in at read time, like it would with a document database.  
+
+The schema-on-read approach is advantageous if the item in the collection don't all have the same structure for some reason:  
+- there are many different types of objects, and it is not practival to put each type of object in its own table  
+- the structure of the data is determined by external systems over which you have no control and which many change at any time  
+
+In situations like that, these schemas may hurt more than it helps. But in cases where all records are expected to have the same structure, schemas are a useful mechanism for documenting and enforcing that structure.  
+
+### Data locallity for queries  
 
