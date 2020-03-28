@@ -105,6 +105,7 @@ If you want to query your data in new ways, you can just declare a new index, an
 
 Query optimizers for relational databases are complicated beasts, and they have consumed many years of research and development effort. But a key insigh of the relational model was this: you only need to build a query optimizer once, and then all applications that use the database can benefit from it.  
 
+
 ### Comparison to document databases
 
 Document databases reverted back to the hierachial model in storing nested records. When it comes to representing many-to-one and many-to-many relationships, relational and document databases are not fundamentally different: in both cases, the related item is referenced by a unique identifier, which is called a foriegn key in a relational mode and a document referenece in a document model. That identifier is resolved at read time by using a join or follow-up query.  
@@ -115,6 +116,7 @@ The main arguments in favor of the document data model are schema flexibility, b
 
 ### Which data model leads to simpler application code?  
 
+
 If the data is your application has a document-like structure (i.e., a tree of one-to-many relationships, where typically the entire tree is loaded at once), then its probabily a good idea to use a document model. The relational technique of shredding- splitting a document-like structure into multiple tables (like position, education, and contact_info) can lead to cumbersome schemas and unnecessarily complicated application code.  
 
 The document model has its limitations: you cannot refer directly to a nested item with a document, but instead you need to say something like "the second item of osition for user 251". However, as long as documents are not too deeply nested, that is not usually a problem. If your application does use many-to-many relationships, the document model becomes less appealing. 
@@ -124,6 +126,7 @@ The document model has its limitations: you cannot refer directly to a nested it
 Most document databases, and the JSON support in relational databases, do not enforce any schema on the data in documents. XML support in relational databases usually comes with optional schema validation. No schema means that arbitrary keys and values can be added to a document, and when reading, cllients have no guarantees as to what fields the documents may contains.  
 
 Document databases are sometimes called *schemaless*, but that is misleading, as the code that reads the data usually assumes some kind of structure, there is an implicit schema, but it is not enforced by the database. A more accurate term is *schema-on-read* (the structure of the data is implicit, and only interpreted when the data is read), in contrast with *schema-on-write* (the traditional approach of relational databases where the schema is explicit and the database ensures all written data conforms to it).  
+
 
 Schema-on-read is similar to dynamic type checking in programming languages, whereas schema-on-write is similar to static type checking. Just as the advocates of static and dynamic type checking have big debates about their relative merits, enforeent of schemas in database is contentiuos topic, and in general there is no right or wrong answer.  
 
@@ -150,4 +153,137 @@ The schema-on-read approach is advantageous if the item in the collection don't 
 In situations like that, these schemas may hurt more than it helps. But in cases where all records are expected to have the same structure, schemas are a useful mechanism for documenting and enforcing that structure.  
 
 ### Data locallity for queries  
+
+A document is usually storedas a single continous string, encoded as JSON, XML, or a binary variat. If your application often needs to access the entire document (for example, to render it on a webpage), there is a performance advantage in this storage locality. If data is split across multiple tables, multiple index lookups are required to retrieve it all, which may require more disk seeks and take more time.  
+
+The locality advantage only applies if you need large parts of the document at the same time. The database typically needs to load the entire document, even if you access only a small portion of it, which can be wasteful on large documents. On updates to a document, the entire document usually needs to be rewritten - only modifications that don;t change the encoded size of a document can easily be performed in palce. For these reasons, it is genereally recommended that you keep documents fairly small and avoid writes that increase the size of a document. These performances limitations significantly reduce the set of situations in which document databases are useful.  
+
+It is worth pointing out that the idea of grouping related data together for locality is not limited to the document mode. For example, Google's Spanner database offers the same locality properties in a relational data model, by allowing the schema tot declare that a table's row should be interleaved with a parent table. Oracle allows the same, using a feature called multi-table index cluster tables. The column-family concept in the Bigtable data model (used in Cassandra and HBase)  has a similar purpose of managing locality.  
+
+### Convergence of document and relational databases  
+
+Most relational database systems have supported XML since the mid 2000's. This includes functions to make local modifications to XML documents and the ability to index the query inside XML documents, which allows applications to use data models very similar to what they would do when using a document database. 
+
+Many databases also support JSON documents. Given the popularity of JSON for web APIs, it is likely that other relational databases will follow in their fotsteps and add JSON support.  
+
+On the document database side, RethingDB supports relational-like joins in its query language, and some MongoDB drivers automatically resolve database references (effectively performing a client-side join, although this is likely to be slower than a join performed in the database since it requires additional network round-trips and is less optimized).  
+
+Relational and document databases are becoming more similar over time, and that is a good thing: the data models complement each other. If a database is able to handle document-like data and perform relational queries on it, applications can use the combination of features that best fits their needs.  
+
+A hybrid of the relational and document model is a good route for databases to take in the future.  
+
+### Query language for data
+
+When a relational model is introduced, it included a new way of querying data: SQL is a declarative query language, whereas most programming languages are imperative. For example, if you have a list of animals species, you might write soemthing like this to return only the sharks in the list:  
+
+Function getSharks() {  
+var sharks = [];  
+for (var i = 0;i < animals.length; i++) {  
+    if (animals[i].family == "Sharks") {  
+        sharks.push(animals[i]);  
+    }  
+}  
+return sharks;  
+}  
+
+
+In relational algebra, you would instead write:  
+sharks = simga_family = "Sharks"^(animals)  
+
+where sigma is the selection operator, returning those animals that match the condition family = "Sharks".  
+
+When SQL was defined, it followed the structure of the relational algebra fairly closely:  
+
+SELECT * FROM animals WHERE family = 'Sharks';  
+
+An imperative language tells the computer to perform certain operations in a certain order. You can imagine stepping through the code line by line, evaluating conditions, updating variables, and deciding whether to go around the loop one more time.  
+
+In a declarative query language, like SQL or relational algebra, you just specify the pattern of the data you want = what condition the results must meet, and how you want the data to be tramsformed (sorted, grouped, aggregated) - but not how to achieve that goal. It is up to the database system's query optimizer to decide which indexes and which join methods to use, and in which order to execute various parts of the query.  
+
+A declarative query language is attractive because it is typically more concise and easier to work with than an imperative API. But more importantly, it also hides implementation details of the database engine, which makes it possible for the database system t introduce performance improvements without requireing any changes to queries.  
+
+For example, in the imperative code shown at the beginning of this section, the list of animals appears in a particular order. If the database wants to reclaim unused disk space behind the scenes, it might need to move records around, changing the order in which the animals appear. Can the database do that safely, without breaking queries?  
+
+The SQL example does not guarantee any particular ordering, and so it does not mind if the order changes. But if the query is written as imperative code, the database can never be sure whether the code is relaying on the ordering or not. The fact that SQL is more limited in functionality gives the database much more room for automatic optimization.  
+
+Finally, declaritive languages often lend themselves to parallel execution. Todaym CPUs are getting faster by adding more cores, not by running at significantly higher clock speeds than before. Imperative code is very hard to parallelize across multiple cores and multiple machines, because it specifies instructions that must be performed in a particular order. Declarative language have a better change of getting faster in parallel execution because they specify only the pattern of the results, not the algorithm that is used to determine the results. The database is free to use a parallel implementation of the query language, if appropriate.  
+
+### MapReduce Querying
+
+MapReduce is a programming model for processing large amounts of data in bulk across many machines, popularized by Google. A limited fro mof MapReduce is supported by some NoSQL datastores, including MongoDB and CouchDB, as a mechanism for performing read-only queries across many documents.  
+
+MapReduce in general is described in more detail in chapter 10. For now, we will just briefly discuss MongoDB's use of the model.  
+
+MapReduce is neither a declarative query language nor a fully imperative query API, but somewhere in between: the logic of the query is expressed with snippets of code, which are called repeatedly by the processing framework. It is based on the map (also known as collect) and reduce (also known as fold or inject) functions that exit in many functional programming languages.  
+
+To give an example, imagine you are a marine biologist, and you add an abservation record to your database everytime you see animals in the ocean. Now you want to generate a report saying how many sharks you have sighted per month.  
+
+In PostgreSQL you might express that query like this:  
+
+SELECT data_trunc('month', 'observation_timesamp') AS observation_month, sum(num_aninmals) AS total_animals  
+FROM observations  
+WHERE family == 'Sharks'  
+GROUP BY observation_month;  
+
+(1) The data_trunc('month', 'observation_timesamp')  function determines the calender month containing timestamp, and returns another timestamp representing the begining of that month. In other words, it rounds a timestamp down the the nearest month.  
+
+The query first filters the observations to only show species in the sharks family, then groups the obervations by the calender month in which they occured, and finally adds up the number of aninmals seen in all observations in that month.  
+
+The same can be expressed with MongoDB's MapReduce feature as follows:  
+
+<p>
+    db.observation.mapReduce(
+        function map() { (2)
+            var year = this.observationTimestamp.getFullYear():
+            var month = this.observationTimestamp.getMonth() + 1;
+            emit(year + "-" + month, this.numAnimals); (3)
+        },
+        function reduce(key, value) { (4)
+            return Array.sum(values); (5)
+        },
+        {
+            query; {family: 'sharks'}, (1)
+            out: "monthlySharkReport" (6)
+        }
+    };
+    
+</p>
+
+1. The filter to consider only shark species can be specified declaratively (this is a MongoDB-specific extension to MapReduce).  
+2. The JavaScript function map is called once for every document that matches query, with this set to the document object. 
+3. The map function emits a key (a string consisting of year and month, such as '2013-12' or '2014-1') and a value (the number of animals in that observation).  
+4. The key-value pair emmited by map are grouped by key. For all key-value pairs with the same key (i.e. the same month and year), the reduce function is called once.  
+5. The reduce function adds up the number of animals from all observations in a particular month.  
+6. The final output is written to the collection monthlySharkReports.  
+
+The map and reduce functions are somewhat restricted in what they are allowed to do. They must be pure functions, which means they only use the data that is passed to them as input, they cannot perform additional database queries, and they must not have any side effects. These restrictions allow the database to run the functions any where, in any order, and rereun them on failure. However, they are nevertheless powerful: they can parse strings, call library functions, perform calculations, and more.  
+
+MapReduce is a failry low-level porgramming model for distributed execution on a cluster of machines. Higher-level query languages like SQL can be implemented as a pipeline of MapReduce operations (see chapter 10), but tehere are also many distributed implementations of SQL that don't use MapReduce. Note there is nothing in SQL that constrains it to running on a single machine, and MapReduce does not have a monopoly on distributed query execution.  
+
+Being able to use JavaScript code in the middle of query is great feature for advanced queries, but it is not limited to MapReduce - some SQL databases can be extended with HavaScript functions too.  
+
+A usability problem with MapReduce is that you have to write two carefully coordinated JavaScript functions, which is often harder than writing a single query. Moreover, a declarative query language offers more opportunities for query optimizer to improve the performance of a query. For these reasonsm MongoDB 2.2 added support for a declarative query language called the aggregation pipeline.  
+
+The aggregation pipeline is similar in expressiveness to a subset of SQL, but it uses a JSON-based syntax rather than SQL's English-sentence-style syntax; the difference is perhaps a matter of taste. The moral of the story is that a NoSQL system may find itself accidentally reinventing SQL, albeit in disguise.  
+
+#### Graph-like Data models
+
+skipped for now.
+
+
+### Summary 
+
+Data models are a huge subject, and in this chapter we have taken a quick look at a broad variety of different models. WE did not have space to go into all the details of each model, but hopefully the overview has been enough to whet your appetite to find out more about the model that best fits your application's requirements.  
+
+Historically, data started out being represented as one big tree (the hierarchial model), but that was not good for representing many to many relationships, so the relational model was invented to solve the problems. More recently, developers found that some applications don't fit well in the relational model either. New nonrelational NoSQL datastores have diverged in two main directions:  
+1. Document databases target use cases where data comes in self-contained documents and relationships between one document and another are rare.  
+2. Graph databases go in the opposite direction, targeting use cases where anything is potentially related to everything.  
+
+All three models are widely used today, and each is good in its respective domain. One model can be emulated in terms of another model - for example, a graph data can be represented in a relational database -but the result is often awkward. That is why we have different systems for different purposes, not a single one-size-fits-all solution.  
+
+One thing that document and graph databases have in common is that they typically don't enforce aschema for the data they store, which can make it easier to adapt applications to changing requirements. Howeverm your application most likely still assume that data has a certain structure; it's just a question of whether the schema is explicit(enforcced on writes) or implicit (handled on read).  
+
+
+
+
 
