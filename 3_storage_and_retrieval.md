@@ -54,6 +54,57 @@ Key-value stores are quite similar to the dictionary type that you can find in m
 
 Let's say our data storage consists only of appends to a file, as in the preceding example. Then the simplest possible indexing strategy is this: keep an in-memory jash map where every key is mapped to a byte offset in the data file - the location which the value can be found. Whenever you append a new key-value pair to the file, you also update the hhash map to reflect the offset of the data you just wrote (this works both for inserting new keys and for updating existing keys). When you want to look up a value, use the hash map to find the offset in the data file, seek to that ocation and read the value.  
 
+This may sound simplistic, but it is a viable approach. In fact, this is essentially what Bitcask does. Bitcask offers high=performance reads and writes, subject to the requirement that all the keys fit in the available RAM, since the hash map is kept completely in memory. The values can use more spcae than there is available memory, since they can be loaded from disk with just one disk seek. If part of the data file is already in the filesysten cachem a read does not requre any disk I/O at all.  
+
+A storage engine like Bitcask is well suited to situations where the value for each key is updated frequently. For example, the key might be the URL of a cat video, and the value might be the number of times it has been plyed (incremented every time someone hits the play button). In this kind of workload, there are a lot of writes, but there are not too many distinct keys - you have a large number of writes per key, but there are not too many distinc keys - you have a large number of writes per key, but it is feasible to keep all keys in memory.  
+
+As described so far, we only ever append to a file - so how do we avoid eventually running out of disk space? A good solution is to break the log into segments of a certain size by closing a segment file when it reaches a certain size, and making subsequent writes to a new segment file. We can then perform compaction on these segments. Compaction means throwing away duplicate keys in the log, and keeping only the most recent update for each key.  
+
+example of compaction:  
+A data file segment with repeated names and updated values. Only taking the last occurence of the name with its updated value.  
+
+Moreover, since compaction often makes segments much smaller (assuming that a key is overwritten serveral times on average within on segment), we can also merge serveral segments together at the same time as performing compaction. Segments are never modified after they have been written, so the merged segment is written to a new file. The merging and compaction of frozen segments can be done in a background thread, and while it is going on, we can still continue to serve read and write requests as normal, using the old segment files. After the merging process is complete, we switch read requests to using the new merged segment instead of the old segments - and the old segment files can simply be deleted.  
+
+Each segment now has its own in-memory hash table, mapping keys to file offsets. In order to find the value for a key, we first check the most recent segment's hash map; if the key is not present we check the second-most recent segment, and so on. The merging process keps the number of segments small, so lookups do not need to check many hash maps.  
+
+Lots of details goes into making this simple idea work in practice. Brieflym some of the issues are that are important in real implementation are:  
+
+File format:  
+    - CSV is not the best format for a log. It is faster and simpler to use a binary format that encodes the length of a string in bytes, followed by the raw string (without need for escaping).  
+    
+Deleting records:  
+    - If you want to delete a key and its associated valuem you ahve to append a special deletion record to the data file (sometimes called a tombstone). When a log segments are merged, the tombstone tells the merging process to discard any previous values for the deleted key.  
+    
+Crash recovery:  
+    - If the database is restarted, the in-memory hash maps are lost. In prinicple, you can restore each segment's hash map by reading the entire segment file from beginning to end and noting the offset of the most recent value for every key you go along. However, this migh take a long time if the segment files are large, which would make server restarts painful. Bitcask speeds up recovery by storing a snapshot of each segment's hash map on disk, which can be loaded into memory more quickly.  
+    
+Partially written records:  
+    - The database may crash at any time, including halfway through appending a record to the log. Bitcask files include checksums, allowing such corrupted parts of the log to be detected and ignored.  
+    
+Concurrency control:  
+    - As writes are appended to the log in a strictly sequential order, a common implementation choice is to have only one writer thread. Data file segments are append-only and otherwise immutable, so they can be read concurrently by multiple threads.  
+    
+An append-only log seems wasteful at first glance: why don't you update the file in place, overwriting the old value with the new value? But an append-only design turns out to be good for serveral reasons:  
+
+    - Appending and segment merging are sequential write operations, which are generally much faster than random writes, especially on magnetic spinning-disk hard drives To some extent sequential writes are also preferable on flash-based solid state drives (SSDs). We will discuss this issue in later in 'comparing B-Trees and LSM-Trees.'  
+    
+    - Concurrency and crash recovery are much simpler if segment files are append only or immutable. For example, you don not have to worry about the case where a crash happened while a value was being overwritten, leaving you with a file containing part of the old and part of the new value spliced together.  
+    
+    - merging old segments avoids the problem of data files getting framgented over time.  
+    
+However, the hash table index also has limitations:  
+
+    - The hash table must fit in memory, so if you have a very large number of keys, you are out of luck. In principle, you could maintain a hash map on disk, but unfortunately it is difficult to make an on-disk hash map perform well. It requires a lot of random access I/O, it is expensive to grow when it becomes full, and hash collisions requre fiddly logic.  
+    
+    - Range queries are not efficient. For example, you cannot easily scan over all keys between kitty00000 and kitty99999 - you would have to look up each key individually in the hash maps.  
+    
+In the next section we will look at an indexing structure that does not have those limitations.  
+
+### SSTables and LSM-Trees
+
+
+
+
 
 
 # Notes
@@ -63,4 +114,3 @@ I learned that though a DE will not be implementing a custom database storage an
 The author created a simple key value database that appends. He showed that for lookup(read) it is a O(n) since when you look up a key you have to scan the entire database file from begining to end. 
 
 To efficiently find a value for a key in a database, a different data structure containing an index is used. An index keeps metadata on the side, and helps you locate the data you want. Indexes can be added which affects the performance of the queries with the trade-off of a slower write but a faster read. Databases don't usually index everything by default, but require developers or data admins to choose indexes to give the greatest performance benifit without introducing more overhead than necessary.  
-
