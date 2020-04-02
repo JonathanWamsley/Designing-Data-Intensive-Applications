@@ -1,3 +1,7 @@
+# Designing Data-Intensive Applications
+
+By: Martin Kleppmann
+
 # Preface
 
 Data-intensive applications are pushing the boundaries of what is possible because:  

@@ -152,6 +152,81 @@ Even though there are many subtleties, the basic idea of LSM-trees is keeping a 
 
 ### B-Trees
 
+The log-structured indexes we have discussed so far are gaining acceptance, they they are not the most common type of index. The most widely used indexing sturcture is quite different: the B-tree.  
+
+Introduced in 1970 and called "ubiquitous" less than 10 years later, B-trees have stood the test of time very well. They remain the standard index implementation in almost all relational databases, and many nonrelational databases use them too.  
+
+Like SSTables, B-trees keep key-value pairs sorted by key, which allows efficient key-value lookups and range queries. But that's where the similarities endL B-trees have a very different design philosophy.  
+
+The log-structued indexes we saw earlier break the database down into variable-size segments, typically several megabytes or more in size, and always write a segment sequentially. By contrast, B-trees break the database down into fixed-size blocks or pages, traditionally 4 KB in size (sometimes bigger), and read or write on page at a time. This design corresponds more closely to underlying hardware, as disks are also arranged in fixed-size blocks.  
+
+Each page can be identified using an address or location, which allows one page to refer to another -- similar to a pointer, but on disk instead of in memory. We can use those page references to construct a tree of pages, as illustrade in Figure 3-6.  
+
+One page is designed as the root of the B-tree; whenever you want to look up a key in the index, you start here. The page contains several keys and references to child pages. Each child is responsible for a continouous range of keys, and the keys between the references indicate where the boundaries between those ranges lie.  
+
+In the example in Figure 3-6, we are looking for the key 251, so we know that we need to follow the page references between the boundaries 200 and 300. That takes us to a similar-looking page that further breaks down the 200-300 range into subranges.  
+
+Eventually we get down to a page containing individual keys (a leaf page), which either contains the value for each key inline or contains a reference to the page where the values can be found.  
+
+The number of references to  child pages in one page of the B-tree is called the branching factor. For example, in Figure 3-6 the branching factor is six. In practice, the branching factor depends on the amount of space required to store the page references and the range boundaries, but typically it is several hundred.  
+
+If you want to update the value for an existing key in a B-tree, you search for the leaf page containing tht key, change the value in that page, and write the page back to disk (any references to that page remain valid). If you want to add a new key, you need to find the page whose range encompasses the new key and add it to that page. If there is not enough free space in the page to accommodate the new key, it is split into two half-full pages, and the parent page is updated to account for the new subdivision of key ranges -- see Figure 3-7.  
+
+This algorithm ensures that the tree remains balanced: a B-tree with n keys always has a depth of O(log n). Most databases can fit into a B-tree that is three or four levels deep, so you do not need to follow many page references to find the page you are looking for. (A four level tree of 4KB page with a branching factor of 500 can store up to 256 TB).  
+
+### Making B-trees reliable  
+
+The basic underlying write operation of a B-tree is to overwrite a page on disk with new data. It is assumed that the overwrite does not change the location of the page; i.e., all references to that page remain intact when the page is overwritten. This is in stark constrast to log-structured indexes such as LSM-trees, which only append to files (and eventually delete obsolete files) but never modify files in place.  
+
+You can think of overwriting a page on disk as an actual hardware operation. ON a magnetic hard drive, this means moving the disk head to the right place, waiting for the right position on the spinning plater to come around, and the overwritting the appropriate sector with new data. On SSDs, what happens is somewhat more complicated, due to the fact that an SSD must erase and rewrite fairly large blocks of a storage chip at a time.  
+
+Moreover, some operations requre several different pages to be overwritten. For example, if you split a page because an insertion caused it to be overfull, you need to write the two pages that were splitm and also overwrite their parent page to update the references to the two child pages. This is a dangerous operation, because if the database crashes after only ome of the pages have been written, you end up with a corupted index (e.g., there may be an rphan page that is not a child of any parent).  
+
+In order to make the database resilient to crashes, it is common for B-tree implementations to include an additional data structure on disk: a write-ahead log (WAL, also known as a redo log). This is an append-only file to which every B-tree modification must be written before it can be applied to the page of the tree itself. WHen the database comes back up after a crash, this log is used to restore the B-tree back to a consistent state.  
+
+An additional complication of updating pages in place is that careful concurrency control is required if multiple threads are going to access the B-tree at the same time -- otherwise a thread may see the tree in an inconsistent state. This is typically done by protecting the tree's data structure with latches (lightweight locks). Logstructured approaches are simplier in this regard, because they do all the merging in the background without interfering with incoming queries and atomically swap old segments for new segments from time to time.  
+
+### B-tree optimizations  
+
+As B-trees have been around for so long, it is not surprising that many optimizations have been developed over the years. To mention a few:  
+
+- instead of overwriting pages and maintaining a WAL for crash recovery, some databases (like LMDB) use a copy-on-write scheme. A modified page is written to a different location, and a new version of the parent page in the tree is created, pointing at the new location. This approach is also useful for concurrency control, as we shall see in 'Snapshot Isolation and Repeatable Read' on page 237.  
+- we can save space in pages by not storing the entire key, but abbreviating it. Especially in pages on the interior of the tree, keys only need to provide enough information to act as boundaries between key ranges. Packing more keys into a pageallows the tree to have a higher branching factor, thus fewer levels.  
+- In general, pages can be posiioned anywhere on the disk; there is nothing requiring pages with nearby key ranges to be nearby on disk. If a query needs to scan over a large part of the key range in sorted order, that page-by-page layout can be inefficient, because a disk seek may be required for every page that is read. Many B-tree implementations therefore try to lay out the tree so that leaf pages appear in sequential order on disk. However, it is difficult to maintain that order as the tree grows. By contrast, since LSM-trees rewrite large segments of the storage in on go during merging, it is easier for them to keep sequential keys close to each other on disk.  
+- Additional pointers have been added to the tree. For example, each leaf page may reference to its sibling pages to the left and right, which allows scanning keys in order without jumping back to parent pages.  
+- B-tree variants such as fractal trees borrow some log-structured ideas to reduce disk seeks (and they have nothing to do with fractals).  
+
+### Comparing B-Trees and LSM-Trees
+
+Even though B-tree implementations are generally more mature than LSM-tree implementations are generally more mature than LSM-tree implementations, LSM-trees are also interesting due to their performance characteristics. As a rule of thumb, LSM-trees are typically faster for writes, whereas B-trees are thought to be faster for reads. Read are typically slower on LSM-trees because they have to check several different data structures and SSTables at different stages of compaction.  
+
+However, benchmarks are often inconclusive and sensitive to details of the workload. You need to test systems with your particular workload in order to make a valid comparison. In this section we will briefly discuss a few things that are worth considering when measuring the performance of a storage engine.  
+
+### Advantages of LSM-trees 
+
+A B-tree index must write every piece of data at least twice: once to the write-ahead log, and once to the tree page itself (and perhaps again as pages are split). There is also overhead from having to write an entire page at a time, even if only a few bytes in that page changed. Some storage engines even overwrite the same page twitce in order to avoid ending up with a partially updated page in the even of a power failure.  
+
+Log-structued indexes also rewrite data multiple times due to repeated compaction and merging of SSTables. This effect -- one write to the database resulting in multiple writes to the disk over the course of the database's lifetime -- is known as write amplification. It is of particular concern on SSDs, which can only overwrite blocks a limited number of times before wearing out.  
+
+In write-heavy applications, the performance bottleneck might be the rate at which the database can write to disk. In this case, write amplification has a direct performance cost: the more that a storage engine writes to disk, the fewer writes per second it can handle within the available disk bandwidth.  
+
+Moreover, LSM-trees are typically able to sustain higher write throughput thab B-trees, partly because they sometimes have lower write amplification (although this depends on the storage engine configuration and workload), abd partly because they sequentially write compact SSTable files rather than having to overwrite several pages in the tree. This difference is particularly important on magnetic hard drives, where sequential writes are much faster than random writes.  
+
+LSM-trees can be compreesed better, thus often produce smaller files on disk than B-trees. B-tree storage engines leave some disk space unused due to fragmentationL when a page is split or when a row cannot fit into an existing page, some space in a page remains unused. Since LSM-treesa re not page-priented and periodically reqrite SSTables to remove fragmentation, they have lower storage overheads, especially when useing leveled compaction.  
+
+On many SSDs, the firmware internally uses a log-structured algoirthm to turn random writes into sequential writes on the underlying storage chips, so the impact of the storage engine's write pattern is less pronounced. However, lower write amplification and reduced fragmentation are still advantageous on SSDs: representing data more compactly allows more read and write requests within the available I/O bandwidth.  
+
+### Downside of LSM-trees 
+
+A downside of log-structured storage is that the compaction process can sometimes interfere with the performance of ongoing reads and writes. Even though storage engines try to perform compaction incrementally and without affecting concurrent access, disk have limited resources, so it can easily happen that a request needs to wait while the disk finishes an expensive compaction operation. The impact on throughput and average response time is usually small, but at higher percentiles the response time of queries to log-structured storages engines can seomtimes be quite high, and B-trees can be more predictable.  
+
+Another issue with compaction arises at high write throughput: the disk's finite write bandwidth needs to be shared between the initial write (logging and flushing a memtable to disk) and the comapction threads running in the background. When writing to an empty database, the full disk bandwidth can be used for the initial write, but the bigger the database gets, the more disk bandwidth is required for compaction.  
+
+If write throughput is high and compaction is not configured carefully, it can happen that compaction cannot keepe up with the rate of incoming writes. In this case, the number of unmerged segments on disk keeps growing until you run out of disk space, and reads also slow down because they need to check more segment files. Typically, SSTable-based storage engines do not throttle the rate of incoming writes, even if compaction cannot keep up, so you need explicit monitoring to detect this situation.  
+
+An advanage of B-trees is that each key exists in exactly one place in the index, whereas log-structured storage engine may have multiple copies of the same key in different segments. This aspect makes B-trees attractive in databases that want to offer strong transactional semantics: in many relational databases, transactional isolation is implemented using locks on ranges of keys, and in a B-tree index, those locks can be directly attached to the tree. In chapter 7 we will discuss this point in more detail.  
+
+B-trees are very ingrained in the architecture of databases and provde consistently good performance for many workloads, so it is unlikely that they will go away anytime soon. In new datastores, log-structured indexes are becoming increasingly popular. There is no quick and easy 
 
 # Notes
 
