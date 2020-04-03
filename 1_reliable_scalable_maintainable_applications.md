@@ -276,7 +276,7 @@ There is unfortunately no easy fix for making applications reliable, scalable, o
 
 ### Why do all entry data engineering positions 'require' (2-3) years of experience in various technologies?
 
-When a data engineer(DE) designs a data-intensive application, architecture, pipeline or other similarl systems, the DE has made assumptions about common load parameters that indicate how a system should operate and scale. If those **assumptions are wrong**, then at **best** the DE efforts are **wasted**, and at **worst** are **counter-productive.**  
+When a data engineer(DE) designs a data-intensive application, architecture, pipeline or other similar systems, the DE has made assumptions about common load parameters that indicate how a system should operate and scale. If those **assumptions are wrong**, then at **best** the DE efforts are **wasted**, and at **worst** are **counter-productive.**  
 
 A business wants to hire qualified engineers because:  
 - good operation teams + bad software = success
