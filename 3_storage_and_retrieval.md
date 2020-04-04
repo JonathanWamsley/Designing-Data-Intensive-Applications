@@ -298,6 +298,104 @@ Further changes to storage engine design will probably be needed if non-volatile
 
 ### Transaction Processing or Analytics?  
 
+In the early days of business data procesing, a write to the database typically corresponded to a commercial transaction taking place: making a sale, placing an order with a suplier, paying an employee's salary, etc. As databases expanded into areas that did not involve money changing hands, the term transaction nevertheless stuck, referring to a group of reads and writes that form a logical unit.  
+
+> A transaction neen't necessarily have ACID (atomicity, consistency, isolation, and durability) properties. Transaction processing just means allowing clients to make low-latency reads and writes -- as opposed to batch processing jobs, which only run periodically (for example, once per day). We discuss the ACID properties in chapter 7 and batch processing in chapter 10.  
+
+Even though databases started being used for many different kinds of data -- comments on blog posts, actions in a game, contacts in an address book, etc. -- the basic access pattern remained similar to processing business transactions. An application typically looks up a small number of records by some key, using an index. Records are inserted or updated based on the user's input. Because these applications are interactive, the access pattern became known as online transaction processing (OLTP).  
+
+However, databases also started being increasingly used for data analytics, which has very different access patterns. Usually an analytic query needs to scan over a huge number of records, only reading a few columns per record, and calculating aggregate statistics (such as count, sum, or average) rather than returning the raw data to the user. For example, if your data is a table of sales transactions, then analytic queries might be:  
+- What was the total revenue of ech of our stores in January?  
+- How many more bananas than usual did we sell during our latest promotion  
+- Which brand of baby food is most often purchased together with brand X diapers?  
+
+These queries are often written by buisiness analysts, and feed into reports that help the management of a company make better decisions (business intelligence). In order to differentiate this pattern of using databases from transaction processing, it has been called online analytic processing (OLAP). The difference between OLTP and OLAP is not always clear-cut, but some typical characteristics are listed:  
+
+| Property             | Transaction processing system (OLTP)              | Analytic system (OLAP)                    |
+|----------------------|---------------------------------------------------|-------------------------------------------|
+| Main read pattern    | Small number of records per query, fetched by key | Aggregate over large number of records    |
+| Main write pattern   | Random-access, low-latency writes from user input | Bulk import (ETL) or event stream         |
+| Primarily used by    | End user/customer, via web application            | Internal analyst, for decision suport     |
+| What data represents | Latest state of data (current point in time)      | History of events that happened over time |
+| Dataset size         | Gigabytes to terabytes                            | Terabytes to petabytes                    |
+
+At first, the same database were used for both transaction processing and analytic queries. SQL turned out to be quite flexible in this regard: it works well for OLTP type queries as well as OLAP=type queries. Nevertheless, in the late 1980s and early 1990s, there was a trend for companies to stop using their OLTP systems for analytics purposes, and to run the analytics on separate database instead. This separate datebase as called a data warehouse.  
+
+### Data Warehousing
+
+An enterprise may have dozens of different transaction processing systemsL systems powering the customer-facing website, controlling point of sale (checkout) systems in physical stores, tracking inventory in warehouses, planning routes for vehicles, managing suppliers, addministering employees, etc. Each of these systems is complex and needs a team of people to maintain it, so they systems end up operating mostly autonomously from each other.  
+These OLTP systems are usually expected to be highly available and to process transactions with low latency, since they are often critical to the operation of the business. Database administrators therefore colely guard their OLTP databases. They are usually reluctant to let business analysts run ad hoc analytics queries on an OLTP database, since those queries are often expensive, scanning large parts of the database, which can harm the performance of concurrently executing transactions.  
+
+A datawarehouse, by contrast, is a separate database that analysts can query to their hearts' content, without affecting OLTP operations. The data warehouse contains a read-only copy of the data in all the various OLTP systems in the company. Data is extracted from OLTP databases (using either a periodic data dump or a continuous stream of updates), transformed into an analysis-friendly schema, cleaned up, and then loaded into the data warehouse. The process og getting data into the warehouse is known as Extract-Transfer-Load (ETL) and is illustrated in Figure 3-8.  
+
+A big advantage of using a separate data warehouse, rather than querying OLTP systems directly for analytics, is that the data warehouse can be optimized for analytic access patterns. It turns out that the indexing algorithms discussed in the first half of this chapter work well for OLTP, but are not very good at answering analytic queries. In the rest of this chapter we will look at stoage engines that are optimized for analytics instead.  
+
+### The divergence between OLTP database and data warehouses  
+
+The data model of a data warehouse is most commonly relational, because SQL is generally a good fit for analytic queries. There are many graphical data analysis tools that generate SQL queries, visualize the results, and allow analsts to explore the data (through operations such as dirll-down and slicing and dicing).  
+
+On the surface, a data warehouse and a relational OLTP database look similar, because they both have a SQL query interface. However, the internals of the systems can look quite different, because they are optimized for very different querry patterns. Many database vendors now focus on supporting either transaction processing or analytics workloads, but not both.  
+
+Some databases, such as Microsoft SQL Server and SAP HANA, have support for transaction processing and data warehousing in the same product. However, they are increasingly becoming two separate storage and query engines, which happen to be accessible through a ocmmon SQL interface.  
+
+Data warehouse vendors such as Teradata, vertica, SAP HANA, and ParAccel typically sell their systems under expensive commercial licenses. Amazon RedShift is a hosted version of ParAccel. More recently, a plethora of open source SQL-on-Hadoop projects have emerged; they re young but aiming to compete with commercial data warehouse systems. These include Apache Hive, Spark SQL, Cloudera Impala, Facebook Presto, Apache Tajo, and Apache Drill. SOme of them are based on ideas from Google's Dremel.  
+
+### Stars and Snowflakes: Schemas for analytics  
+
+As explored in Chapter 2, A wide range of different data models are used in the realm of transaction processing, depending on the needs of the application. On the other hand, in analytics, there is much less diversity of data models. Many data warehouses are used in a fairly formulaic style, known as star schema (also known as dimensional modeling).  
+
+The example schema in Figure 3-9 shows a datawarehouse that might be found at a grocery retailer. At the center of the schema is a so-called fact table (in this example, it is called fact_sales). Each row of the fact table represents an event that occurede at a particular time (here, each row represents a customer's purchase of a product). If we were analyzing website traffic rather than retail sales, each row might represent a page view or a click by a user.  
+
+Usually facts are captured as individual events, because this allows maximum flexibility of analysis later. However, this means that the fact table can become extremely large. A big enterprise like apple, Walmart, or eBay may have tens of petabytes of transaction history in its data warehouse, most of which is in fact tables.  
+
+Some of the columns in the fact table are attributes, such as the price at which the product was sold and the cost of buying it from the supplier (allowing the profit margin to be calculated). Other columns in the fact table are foreign key references to other tables, called dimension tables. As each row in the fact table represents and vent, the dimensions represent the who, what, where, when, how and why of the event.  
+
+For example, in Figure 3-9, one dimensions is the product that was sold. Each row in the dim_product table represents one type of product that is for sale, including its stock-keeping unit (SKU), description, brand name, category, fat content, package size, etc. Each row in the fact_sales table uses foreign key to indicate which product was sold in the particular transaction. (For simplicity, if the customer buys serveral different products at once, they are represented as seoarate rows in the fact table.)  
+
+Even date and time re often represented using dimension tables, because this allows additional information about dates( such as public holiday) to be encoded, allowing queries to differentiate between sales on holidays and non-holidays.  
+
+The name "star schema" Comes from the fact that when the table relationships are visualized, the fact table is in the middle, surrounded by its dimension tables; the connections to these tables are like the rays of a star.  
+
+A variation of this template is knwon as the snowflake schema, where dimensions are further broken down into subdimensions. For example, there could be separate tables for brands and product categories, and each row in the dim_product table could reference the brand and category as foreign keys, rather than storing them as string in the dim_product table. Snowflake schemas are more normalized than star schemas, but star schemas are often preferred because they are simpler for analysts to work with.  
+
+In a typical data warehouse, tables are often very wideL fact tables often have over 100 columns, sometimes several hundred. Dimension table can also be very wide, as they include all the metadata that may be relevant for analysis -- for example, the dim_store table may include details of which services are offered at each store, whether it has an in-store bakery, the square footage, the date when the store was first opened, when it was remodeled, how far it is from the nearest highway, etc.  
+
+### Column-Oriented Storage  
+
+If you have trillions of rows and petabytes of data in your fact tables, storing and querying them efficiently becomes a challenging problem. Dimension tables are usually much smaller (millions of rows), so in this section we will concentrate primarily on storage of facts.  
+
+Although fact tables are often over 100 columns wide, a typical data warehouse query only accesses 4 or 5 of them at one time ("SELECT *" queries are rarely needed for analytics). Take the query in Example 3-1: it access a large number of rows (every occurrence of someone buying fruit or candy during the 2013 callender year), but it only needs to access three columns of the fact_sales table: date_key, product_sk, and quantity. The query ignores all other columns.  
+
+Example 3-1. Analyzing whether people are more inclined to buy fresh fruit or candy depending on the day of the week  
+
+<p>
+    SELECT
+        dim_date.weekday, dim_product.category,
+        SUM(fact_sales.quantity) AS quantity_sold
+    FROM fact_sales
+        JOIN dim_date ON fact_sales.date_key = dim_date.date_key
+        JOIN dim_product ON fact_sales.product_sk = dim_product.product_sk
+    WHERE
+        dim_date.year = 2013 AND
+        dim_product.category IN ('Fresh fruit', 'Candy')
+    GROUP BY
+        dim_date.weekendm dim_product.category;
+</p>
+
+
+How can we execute this query efficiently?  
+
+In most OLTP databases, storage is laid out in row-oriented fashion: all the values from one row of a table are stored next to each other. DOcument databases are similar: an entire document is typically stored as one contiguous sequence of bytes. You can see thsi in CSV example of Figure 3-1.  
+
+In order to process a query like 3-1, you may have indexes on fact_sales.date_key and/or fact_sales.product_sk that tell the storage engine where to find all the sales for a particular date or for a particular product. But then, a row-oriented storage engine still needs to load all the of those rows (each consisting of over 100 attributes) from disk into memory, parse them, and filter out those that do not meet the required conditions. That can take a long time.  
+
+The idea behind column-oriented storage is simple: don't store all the values from one row together, but store all the values from each column together instead. If each column is stored in a separate file, a query only needs to read and parse those columns that are used in that query, which can save a lot of work. This principle is illustrated in Figure 3-10.  
+
+Column storage is easiest to understand in a relational data model, but it applies equally to non relational data. For example, Parquet is a columnar storage format that supports a document data model, based on Google's Dremel.  
+
+The column-oriented storage layout relies on each column file containing the rows in the same order. Thus if you need to reassemble an entire row, you can take the 23rd entry from each of the individual column files and put them together to form a 23rd row of the table.  
+
+
 
 
 # Notes
