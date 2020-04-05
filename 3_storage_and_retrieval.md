@@ -395,6 +395,76 @@ Column storage is easiest to understand in a relational data model, but it appli
 
 The column-oriented storage layout relies on each column file containing the rows in the same order. Thus if you need to reassemble an entire row, you can take the 23rd entry from each of the individual column files and put them together to form a 23rd row of the table.  
 
+### Column compression
+
+Beside only loading those columns from disk that are required for a query, we can further reduce the demands on disk throughput by compressing data. Fortunately, column-oriented storage often lends itself very well to compression.  
+
+Take a look at the sequence of values for each column in Figure 3-10: they often look quite repetitive, which is a good sign for compression. Depending on the data in the column, different compression techniques can be used. One technique that is particularly effective in data warehouses is bitmap encoding, illustrated in Figure 3-11.  
+
+Often, the number of distinct values in a column is small comapred to the number of rows (for example, a retailer may have billions of sales transactions, but only 100,000 distinct products). We can now take a column with n distinct values and turn it into n separate bitmaps: one bitmap for each distinct value, with one bit for each row. The bit is 1 if the row has that value, and 0 if not,  
+
+If n is very small (for example, a country column may have approximately 200 distinct values), those bitmaps can be stored with one bit per row. But if n is bigger there will be a lot of zeros in most of the bitmaps(we say that they are sparse)l In that case, the bitmaps can additionally be run-length encoded, as shown at the bottom of Figure 3-11. This can make the encoding of a column remarkably compacted.  
+
+Bitmap indexes such as these are very well suited for the kinds of queries that are common in a data warehouse. For example:  
+
+WHERE product_sk IN (30, 68, 69):  
+Load the three butmaps for product_sk = 30, product = 68, and product_sk = 69, and calculate the bitwise OR of the three bitmap, which can be done very efficiently.  
+
+Where product_sk = 31 AND store_sk = 3:
+> Load the bitmaps for product_sk = 31 and store_sk = 3, and calculate the bitwise AND. This works because the columns contain the wors in the same order, so the kth but in one column's bitmap corresponds to the same row as the kth bit in another column's bitmap.  
+
+There are also various other compression schemes for different kinds of data, but we won't go into them in detail.  
+
+### Column-oriented storage and column families  
+
+> Cassandra and HBase have a concept of column families, which they inherited from Bigtable. However, it is very misleading to call them column-oriented: within each column family, they store all columns from a row together, along with a row key, and they do not use column compression, Thus, the Bigtable model is still mostly row-oriented.  
+
+### Memory bandwidth and vectorized processing  
+
+For data warehouse queries that need to scan over millions of rows, a big bottleneck is the bandwidth for getting data from disk to memory. However, that is not the only bottleneck. Developers of analytical databases also worry about efficiently using the bandwidth from main memory into the CPU cache, avoiding branch mispredictions and bubbles in the CPU instruction processing pipeline, and making use of single-instruction-multi-data (SIMD) instructions in modern CPUs.  
+
+Besides reducing the volume of data that needs to be loaded from disk, column oriented storage layouts are also good for making efficient use of CPU cycles. For example, the query engine can take a chunk of compressed column data that fits comfortably in the CPU's L1 cache and iterate through it in tight loop (that is, with no function calls). A function calls and conditions for each record that is processed. Column compression allows more rows from a column colmn to fit in the same amount of L1 cache. Operators, such as bitwise AND and OR described previously, can be designed to operate on such chunks of compressed column data directly. This technique is known as vectorized processing.  
+
+### Sort order in column storage 
+
+In a column store, it doesn't necessarily matter in which order the rows are stored. It's easiest to store them in the order in which they were inserted, since then inserting a new row just means appending to each of the column files. However, we can choose to impose order, like we did with SSTables previously, and use that as an indexing mechanism.  
+
+Note that it would'nt make sense to sort each column independently, beause then we would no longer know which items in the columns beolong the the same row. We can only reconstruct a row because we know that the kth item in one column belongs to the same row as the kth item in another column.  
+
+Rather, the data needs to be sorted an entire row at a time, even though it is stored by column. The administrator of the satabase can choose the columns belongs to the same row as the kth item in another column.  
+
+Rather, the data needs to be sorted an entire row at a time, even though it is stored by column. The administrator of the database can choose the columns by which the table should be sorted, using their knowledge of common queries. For example, if queries often target date ranges, such as the last month, it maight make sense to make date_key the first sort key.  
+
+Second column can determine the sort order of any rows that have the same value in the first column. For example, if date_key is the first sort key in Figure 3-10, it might make sense for product_sk to be the second sort key so that all sales for the same product on the same day are grouped together in storage. That will help queries that need to group or filter sales by product within a certain date range.  
+
+Another advantage of sorted order is that it can help with compression of columns. If the primary sort column does noth have many distint values, then after sorting, it will have long sequences where the same value is repeated many times in a row. A simple run-length encoding, like we used for the bitmaps in Figure 3-11, could compress that column down to a few kilobyes.  
+
+That compression effect is strongest on the first sort key. The second and third sort keys will be more jumbled up, and thus not have such runs of repeated values. Columns further down the sorting priority appear in essentially random order, so they probably won't compress as well. But having the first few columns sorted is still a win overall.  
+
+# Several different sort orders  
+
+A clever extension of this idea was introduced in C-Store and adopted in the commercial data warehouse Vertica. Different queries benefit from different sort orders, so why not store the same data sorted in several ways? Data needs to be replicated to multiple machines anyway, so that you don't lose data if one machine fails. You might as well store that redundant data sorted in different ways so that when you're processing a query, you can use the version that best firts the query pattern.  
+
+Having multiple sort orders in a column-oriented store is a bit similar to having multiple secondary indexes just contain pointers to the matching rows. In a column store, there nromally aren't pointers to data elsewhere, only columns to containing values.  
+
+# Writing to column-oriented storage
+
+These optimizations make sense in data warehouses, because most of the load consists of large read-only queries run by data analysts. Column-oriented storage, compression, and sorting all help to make those read queries faster. However, they have the downsize of making writes more difficult.  
+
+An update-in-place approach, like B-trees use, is not possible wiht compressed columns. If you wanted to insert a row in the middle of a sorted table, you would most likely have to rewrite all the column files. As rows are identified by their position within a column, the insertion has to update al columns consistently.  
+
+Fortunately, we have already seen a good solution earlier in this chapter: LSM-trees. All writes first go to an in=memory store, where they are added to a sorted structure and prepared for wrting to disk. It doesn't matter whether the in=memory store is row-oriented or column=oriented. When enough writes have acummuated, they are merged with the column files on disk and written to new files in bulk. This is essentially what Vertica does.  
+
+Queries need to examine both the column data on disk and the recent writes in memory, and combine the two. However, the query optimizer hides this distinction from the user. From an analyst's point of view, data that has been modified with inserts, updates, or deletes is immediately reflected in subseqyent queries.  
+
+### Aggregation: Data cubes and materialized views  
+
+Now every data warehouse is necessarily a column store: traditional row-oriented databases and a few other architectures are also used. However, columnar storage can be significantly faster for ad hoc analytical queries, so it is rapidly gaining popularity.  
+
+Another aspect of data warehouses that is worth mentioning briefly is materialized aggregates. As discussed earlier, data warehouse queries often involve an aggregate function, such as COUNT, SUM, AVG, MIN, or MAX in SQL. If the same aggregates are used by many different queries, it can be wateful to crunch through the raw data everytime. Why not cache some of the counts or sums that queries use most often?  
+
+One way of creating such a cache is a materialized view. In a relational model, it is often defined like a standard (virtual) view: a table-like object whose contents are the results of some query. The difference is that a materialized view is an actual copy of the query reslts of some query. The difference is that a materialized view is an actual copy of the query results, written to disk, whereas a virtual view is just a shortcut for writing queries. When you read from a virtual view, the SQL engine expands it into the view's underlying query on the fly and then processes the expanded query.  
+
 
 
 
@@ -405,3 +475,5 @@ I learned that though a DE will not be implementing a custom database storage an
 The author created a simple key value database that appends. He showed that for lookup(read) it is a O(n) since when you look up a key you have to scan the entire database file from begining to end. 
 
 To efficiently find a value for a key in a database, a different data structure containing an index is used. An index keeps metadata on the side, and helps you locate the data you want. Indexes can be added which affects the performance of the queries with the trade-off of a slower write but a faster read. Databases don't usually index everything by default, but require developers or data admins to choose indexes to give the greatest performance benifit without introducing more overhead than necessary.  
+
+
