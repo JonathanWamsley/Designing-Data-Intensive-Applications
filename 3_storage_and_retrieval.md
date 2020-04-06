@@ -465,7 +465,41 @@ Another aspect of data warehouses that is worth mentioning briefly is materializ
 
 One way of creating such a cache is a materialized view. In a relational model, it is often defined like a standard (virtual) view: a table-like object whose contents are the results of some query. The difference is that a materialized view is an actual copy of the query reslts of some query. The difference is that a materialized view is an actual copy of the query results, written to disk, whereas a virtual view is just a shortcut for writing queries. When you read from a virtual view, the SQL engine expands it into the view's underlying query on the fly and then processes the expanded query.  
 
+When the underlying data changes, a materialized view needs to be updated, because it is a denormalized copy of the data. The database can do that automatically, buy such updates make writes more expensive, which is why materialized views are not often used in OLTP databases. In read-heavy data warehouses they can make more sense (whether or not they actually improve read performance depends on the individual case).  
 
+A common special case of a materialized view is know as a data cube or OLAP cube. It is a grid of aggregates grouped by different dimensions. Figure 3-12 shows an example.  
+
+Imagine for now that each fact has fireign keys to only two dimension tables - in Figure 3-12, those are date and product. You can now draw a two-dimension table, with dates along one axis and products long the other. Each cell contains the aggregate (e.g., SUM) of an attribute (e.g., net_price) of all facts with that date-product combination. Then you can apply the same aggregate along each row or column and get a summary that has been reduced by one dimension (the sales by product regardless of date, or the sales by date regardless of product).  
+
+In general, facts often have more than two dimensions. In Figure 3-9 there are five dimensions: date, product, store, promotion, and customer. It's a lot harder to imagine what a five-dimensional hypercube would look like, but the principle remains the same: each cell comtains the sales for a particular date-product-store-promotion-customer combination. These values can then repeatedly be suammaraized along each of the dimensions.  
+
+The advantage of materialized data cube is that certain queries become very fast because they have effectively been precomputed. For example, if you want to know the total sales per store yesterday, you just need to look at the totals along the appropriate dimension - no need to scan millions of rows.  
+
+The disadvantage is that a data cube does'nt have the same flexibility as querying the raw data. For example, there is no way of calculating which proportion of sales come from items that cost more than 100, because the price isn't one of the dimensions. Most data warehouses therefore try to keep as much raw data as possible, and use aggregates such as data cubes only as a performance boost for certain queries.  
+
+### Summary
+
+In this chapter we tried to get to the bottom of how database handle storage and retrieval. What happens when you store data in database, and what does the database do when you query for the data again later?  
+
+On a high level, we saw that storage engines fall into two broad categories: those optimized for transation processing (OLTP), and those optimized for analytics (OLAP). There are big differences between the access patterns in those use cases:  
+
+- OLTP systems are typically user-facing, which means that they may see a huge volume of requests. In order to handle the load, applications usually only touch small number of records in each query. The application requests records using some kind of key, and the storage engine uses an index to find the data for the requested key. Disk seek time is often the bottleneck here.  
+
+- Data warehouses and similar analytic systems are less well known, because they are primarily used by bysiness analysts, not by end users. They handle a much lower volume of queries than OLTP systems, but each query is typically very demanding, requiring many millions of records to be scanned in a short time. Disk bandwidth (not seek time) is often the bottleneck here, and column-oriented storage is an increasingly popular solution for this kind of workload.  
+
+On the OLTP side, we saw storage engines from two main schools of thought:  
+- The log-structured school, which only permits appending to files and deleting obsolete files, buy never updates a file that has been written. Bitcask, SSTables, LSM-trees, LevelDB, Cassandra and others belong to this group.  
+- The update-in-place school, which treats the disk as a set of fixed-size pages that can be overwritten. B-Trees are the biggest example of this philosophy, being used in all mojor relational databases and also many nonreltional ones.  
+
+Log-structured storage engines are a comparatevely recent development. Their key idea is that they systematically turn random-access writes into sequential writes on disk, which enables higher write throughput due to the performance characteristics of hard drives and SSDs.  
+
+Finishing off the OLTP side, we did a brief tour through some more complicated indexing structures, and databases that are optimezed for keeping all data in memory.  
+
+We then took a detour from the internals of storage engines to look at the high-level architecture of a typical data warehouse. This background illustrated why analytic workloads are so different from OLTP: when your queries requrie sequentially scanning across a large number of rows, indexes are much less relevant. Instead it becomes important to encode data very compactly, to minimize the amount of data that he query needs to read from disk. We discuss how column-oriented storage helps achieve this goal.  
+
+As an application developer, if you're armed with this knowledge about the internals of storage engines, you are in a much better position to know which tool is best suited for your particular application. If you need to adjust a database's tuning parameters, this understanding allow you to image what effect a higher or a lower value may have.  
+
+Although this chapter couldn't make you and expert in tuning any one particular storage engine, it has hopefully equiped you with enough vocabulary and ideas that you can make sense of the documentation for the database of your choice.  
 
 
 # Notes
