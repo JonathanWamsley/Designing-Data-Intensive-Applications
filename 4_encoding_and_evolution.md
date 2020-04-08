@@ -90,3 +90,60 @@ In the following section we will see how we can do much better, and encode the s
 
 ### Thrift and Protocol Buffers
 
+Apache Thrift and Protocol Buffers (protobuf) are binary encoding libarries that are based on the same principle. Protocol Buffers was originally developed at Google, Thrift was originally developed at Facebook, and both were made open source in 2007-2008.  
+
+Both Thrift and Protocol Buffers requre a schema for aby data that is encoded. To encode the data in Example 4-1 in Thrift, you would describe the schema in the Thrift interface definition language (IDL) like this:  
+
+<p>
+    struct Person {
+        1: required string userName,
+        2: optional i64 favoriteNumber,
+        3: optional list string> interests
+    
+    
+    The equivalent schema definition for Protocol Buggers looks very similar:
+    
+    message Person {
+        required string user_name = 1;
+        optional int 64 favorite_number = 2;
+        repeated string interests = 3;
+    }
+</p>
+
+Thirst and Protocol Buffers each come with code generation tool that takes a schema definition like the ones shown here, and produces classes that implement the schema in various programming languages. Your application code can call this generated code to encode or decode records of the schema.  
+
+What does data encoded with this schema look like? Confusingly, Thrift has two0different binary encoding formats, called BinaryProtocol and CompactProtocol, respectively. Let's look at binaryProtocol first. Encoding Example 4-1 in that format takes 59 bytes, as shown in Figure 4-2.  
+
+Similarly to Figure 4-1, each field has a type annotation (to indicate whether it is a string, integer, list etc.) and, where required, a length indication (length of a string, number of items in a list). The strings that appear in the data ("Martin", "daydreaming", "hacking") are also encoded as ASCII (or rather UTF-8), similar to before.  
+
+The big difference compared to Figure 4-1 is that there are no field names (userName, favoriteNumber, interests). Instead, the encoded data contains field tags, which are numbers(1, 2, and 3). Those are the numbers that appear in the schema defination. Field tags are like aliases for fields - they are compact way of saying what field we're talking about, without having to spell out the field name.  
+
+The thrift CompactionProtocol encoding is semantically equivalent to BinaryProtocol, but as you can see in Figure 4-3, it packs the same information into only 34 bytes. It does this by packing the field type and tag number into a single byte, and by using variable-length integers. Rather than using a full eight bytes for number 1337, it is encoded in two bytes, with the top bit of each byte used to indicate whether there are still more bytes to come. This means numbers between -64 and 63 are encoded in one byte, numbers between -8192 and 8191 are encoded in two bytes, etc. Bigger numbers use more bytes.  
+
+Finally, Protocol Buffers (which has only one binary encoding format) encodes the same sata as shown in Figure 4-4. It does the bit packing slightly differently, but is otherwise very similar to Thrift's CompactProtocol. Protocol Buffers fits the same record in 33 bytes.  
+
+One detail to note: in the schemas shown earlier, each field was marked either required or optional, but this makes no difference to how the field is encoded (nothing in the binary data indicates whether a field was required). The difference is simply that required enables a runtime check that fails if the field is not set, which can be useful for catching bugs.  
+
+### Field tags and scheme evolution
+
+We said previously that schemas inevitably need to change over time. We call this schema evolution. How do Thrift and Protocol Buffers handle schema changes while keeping backward and forward compatibility?  
+
+As you can see from the examples, an encoded record is just the concatentation of its encoded fields. Each field is identified by its tag number (the numbers 1, 2, 3 in the sample schemas) and annotated with datatype (e.g., string or integers). If a field value is not set, it is simply omitted from the encoded record. From this you can see that field tags are critical to the meaning of the encoded data. You can change the name of a field in the schema, since the encoded data never refers to field names, but you cannot change a field's tag, since that would make all existing encoded data invalid.  
+
+You can add new fields to the schema, provided that you give each field a new tag number. If old code (which doesn't know about the new tag numbers you added) tries to read data written by new code, including a new field with a tag number it doesn't recognize, it can simply ignore the field. The datatype annotation allows the parser to determine how many bytes it needs to skip. This maintains forward compatibility: old code can read records that were written by new code.  
+
+What about backward compatibility? As long as each field has a unique tag number, new code can always read old data, because the tag numbers still have the same meaning. The only detail is that if you add a new field, you cannot make it required. If you were to add a field and make it required, that check would fail if new code read data written by old code, because the old code will not have written the new field that you added. Therefore, to maintain backward compatiability, every field you add afer the initial deployment of the schema must be optional or have a default value.  
+
+Removing a field is just like adding a field, with backward and forward compatibility concerns reversed. That means you can only remove a field that is optional (a required field can never be removed), and you can never use the same tag number again (because you may still have data written somewhere that includes the old tag number, and that field must be ignored by new code).  
+
+### Datatypes and schema evolution
+
+What about changing the datatype of a field? that may be possible - check the documentation for details - but there is a risk that values will lose precision or get tuncated. For example, say you change a 32-bit integer into a 64-bit integer. New code can easily read data written by old code, beause the parser can fill in any missing bits with zeros. However, if old code reads data written by new code, the old code is still using a 32-bit variable to hold the value. If the decoded 64-bit value won't fit in 32 bits, it will be truncated.  
+
+A curious detail of Protocol Buffers is that it does not have a list or array datatype, but instead has a repeated marker for fields (which is a third option alonggside required and optional). As you can see in Figure 4-4, the encoding of a repeated field is just what it says on the tin: the same field tag simply appears multiple times in the record. This has the nice effect that it's okay to change an optional (singlevalued) field into a repeated (multivalued) field. New code reading old data sees list with zero or one elements(depending on whether the field was present); old code reading new data sees only the last element of the list.  
+
+Thrift has a dedicated list datatype, which is parameterized with datatype of the list elements. This does not allow the same evolution from single-valued to multivalued Protocol Buffers does, but it has the advantage of supporting nested lists.  
+
+### Avro
+
+
