@@ -146,4 +146,113 @@ Thrift has a dedicated list datatype, which is parameterized with datatype of th
 
 ### Avro
 
+Apache Avro is another binary encoding format that is inerestingly different from Protocol Buffers and Thrift. It was started in 2009 as a subproject o Haddop, as a result of Thrift not being a good fit for Hadoop's use cases.  
+
+Avro also uses a schema to specify the structure of the data being encoded. It has two schema languages: one (Avro IDL) intened for human editing, and one (based on JSON) that is more easily machine-readable.  
+
+Our example schema, writtein in Avro IDL, might look like this:  
+<p>
+    record Person {
+    string userName;
+    union {null, long} favoriteNumber = null;
+    array string> interests;
+    }
+    
+    The equivalent JSON representation of that schema is as follows:  
+    
+    {
+        "type" : "record",
+        "name": "Person",
+        "fields": [
+            {"name": "userName", "type": "string"},
+            {"name": "favoriteNumber", "type": ["null", "long"], "default": null},
+            {"name": "interests", "type": {"type": "array", "items": "string"}}
+        ]
+    }
+</p>
+
+First of all, notice that there are no tag numbers in the schema. If we encode our example record (Example 4-1) using this schema, the Avro binary encoding is just 32 bytes long - the most compact of all the encodings we have seen. The breakdown of the encoded byte sequence is showin in Figure 4-5.  
+
+If you examine the byte sequence, you can see that there is nothing to identify fields of their datatypes. THe encoding simpily consists of values concatenated together. A string is just a length prefix folllowed by UTF-8 bytes, but there's nothing in the encoded data that tells you that it is a string. It could just as well be an integer, or something else entirely. An integer is encoded using a variable-length encoding (the same as Thrift;s CompactProtocol).  
+
+To parse the binary data, you go through the fields in the order that they appear in the schema and use the schema to tell you the datatypes of each field. THis means that the binary data can only be decoded correctly if the code reading the data is using the exact same schema as the code that wrote the data. Any mismatch in the schema between the reader and the writer would mean incorrectly decoded data.  
+
+So, how does Avro support schema evolution?  
+
+# The writer's schema are the reader's schema
+
+With Avro, when an application wants to encode some data (to write it to a file or database, to send it from the network, etc.), it encodes the data using whatever version of the schema it knows about - for example, that schema may be compied into the application. This is known as the writer's schema.  
+
+When an application wants to decode some data (read it from a file or database, receive it from the network, etc.), it is expecting the data to be in some schema, which is known as the reader's schema. Tgat is the schema the application code is relying on - code may have been generated from the schema during he application's build process.  
+
+the key idea with Avro is that the writer's schema and the reader's schema don't have to be the same - they only need to be compatible. When data is decoded (read), the Avro library resolves the differences by looking at te writer's schema and the reader's schema side by side and translating the data from the writer's schema into the reader's schema. The Avro specification defines exactly how this resolution works, and it is illustrated in Figure 4-6.  
+
+For example, it's no problem if the writer's schema and the reader's schema have their field in a different order, because the schema resolution matches up the fields by field name. If the code reading the data encounters a field that appears in the writer's schema but not in the reader's schema, it is ignored. If the code reading the data expects some field, but the writer's schema does no contain a field of that name, it is filled in with a default value declared in the reader's schema.  
+
+### Schema evolution rules
+
+With Avro, forward compatibility means that you can have a new version of the schema as writer and an old version of the schema as reader. Conversely, backward compatibility means that you can have a new version of the schema as reader an an old version as writer.  
+
+To maintain compatibility, you may only add or remove a field that has a default value. (The field favoriteNumber is our Avro schema has a default value of null.) For example, say you add a field with a default value, so this new field exists in the new schema but not the old one. When a reader using the new schema reads a record written with the old schema, the default value is filled in for missing field.  
+
+If you were to add a field that has no default value, new readers wouldn't be able to read data written by old writers. so you would break backward compatitbility. If you were to remove a field that has no default value, old readers wouldn't be able to read data written by new writers, so you would break forward compatbility.  
+
+In some programming language languages, null is an acceptable default for any variablle, but this is not the ase in Avro: if you want to allows a field to be null, you have to use a union type. For example, union {null, long string} field; indicates that field can be a number, or a string, or null. You can only use nul as default value if it is one of the branches of the union. This is a little more verbose than having everything nullable by defaut, but it helps prevent bugs by being explicit about what can and cannot be null.  
+
+Consequently, Avro doesn't have optional and required markers in the same way as Protocol Buffers and Thrift do (it has union types and default values instead).  
+
+Changing the datatype of a field is possible, provided that Avro can convert the type. Changing the name of a field is possible but a little tricky: the reader's schema can contain aliases for field names, so it can match an old writer's schema field names against the aliases. This means that changing a field name is backward compatible but not forward compatible. Similarly, adding a branch to a union type is backward compatible but not forward compatible.  
+
+### But what is the writer's schema?  
+
+There is an important question that we've glossed over so far: how does the reader know the writer's schema with which a particular piece of data was encoded? We can't just include the entire schema with every record, because the schema would likely be much bigger than the encoded data, making all the space savings from the binary encoding futile.  
+
+THe answer depends on the context in which Avro is being used. To give a few examples:  
+
+Large file with lots of records:  
+- A common use for Avro - especially in the context of Hadoop - is for storing a large file containing millions of records, all encoded with the same schema. (We will discuss this kind of situation in Chapter 10.) In this case, the writer of that file can just include the writer's schema once at the beginning of the file. Avro specifies a file format (object container files) to do this.  
+
+Database with indicidually written record:  
+- In a database, different records may be written at different points in time using different writer's schemas - you cannot assume that all the record will have the same schema. The simplest solution is to include a version number at the begining of every encoded record, and to keep a list of schema versions in your database. A reader can fetch a record, extract the version number from the database. Using the writer's schema, it can decode the rest of the record. (Espresso works this way, for example.)  
+
+Sending records over a network connection:  
+- Wehn two processes are communicating over a bidirectiona; network connection, they can negotiate the schema version on connection setup and then use that schema for the lifetime of the connection. The Avro RPC protocol (see "Dataflow Through Services: REST and RPC" on page 131) works like this.  
+
+A database of schema versions is a useful thing to have in anycase, since it acts as documentation and gives you a chance to check schema compatibility. As the version number, you could use a simple incrementing integer, or you could use a hash of the schema.  
+
+### Dynamically generated schemas
+
+One advantage of Avro's approach, compared to Protocol Buffers and Thrift, is that the schema doesn't contain any tag numbers. But why is this important? What's the problem with keeping a couple of numbers in the schema?  
+
+The difference is that Avro is friendlier to dynamically generated schemas. For example, say you have a relational database whose contents you want to dump to a file, and you want to use a binary format to avoid the aforementioned problems with textual formats (JSON, CSV, SQL). If you use Avro, you can fairly easily generate an Avro schema (in JSON representation we saw earlier) from the relational schema and encode the database contents using that schema, dumping it all to an Avro object container file. You generate a record schema for each database table, and each column becomes a field in that record. The column name in the database maps to the field name in Avro.  
+
+Now, if the database schema changes (for example, a table has one column added and one column removed), you can just generate a new Avro schema from the updated database schema and export data in the new Avro schema. The data export process does not need to pay any attention to the schema change - it can simply do the schema conversion every time it runs. Anyone who reads the new data files will see that the fields of the record have changed, but since the fields are identified by name, the updated writer's schema can stil be matched up with the old reader's schema.  
+
+By contrast, if you were using Thrift or Protocol Buffers for the purpose, the field tags would likely have to be assigned by hand: every time the database schema changes, an administrator would have to manually update the mapping from ddatabase xlumn names to field tags. (it might be possible to automate this, but the schema generator would have to be very careful to no assign previously used field tags.) This kind of dynamically generated schema simply wasn't a design goal of Thrift or Porocol Buffers, whereas it was for Avro.  
+
+### Code generation and dynamically typed languages  
+
+Thrift and and Protocol buffers rely on code generation: after a schema has been defined, you can generate code that implements this schema in a programming language of your choice. This is useful in statically typed languages such as Java, C++, or C#, because it allows efficient in-memory structures to be used for decoded data, and it allows type checking and autocompletion in IDEs when writing programs that access the data structures.  
+
+In dynamically typed programming languages such as JavaScript, Ruby, or Python, there is not much point in generating code, since there is no compile-time type checker to satisfy. Code generation is often frown upon in these languages, since they otherwise avoid an explicit compilation step. Moreover, in the case of a dynamically generated schema (such as Avro schema generated from a database table), code gneration is an unnecessary metadata.  
+
+This property is especially useful in conjunction with dynamically typed data processing languages like Apache Pig. In Pig, you can open some Avro files, start analyziing them, and write derived datasets to output files in Avro format without even thinking about schemas.  
+
+### The Merits of Schemas
+
+As we saw, Protocol Buffers, Thrift, and Avro all use a schema to describe a binary encoding format. Their schema languages are much simpler than XML Schema or JSON Schema, which support much more detailed validation rules (e.g., "the string value of this field must match this regular expression" or "the integer value of this field must be between 0 and 100"). As Protocol Buffers, Thrift, and Avro are simpler to implement and simpler to use, they have grown to support a fairly wide range of programming languages.  
+
+The ideas on which these encodings are based are by no means new. For example, they have a lot in common with ASN.1, a schema definition language that was first standardized in 1984. It was used to define various network protocols, and its binary encoding (DER) is still used to encode SSL certificates, for example, ASN.1 supports schema evolution using tag numbers, similar to Protocol Buffers and Thrift. However, it's also very complex and badly documented, so ASN.1 is probably not a good choice for new applications.  
+
+Many data systems also implement some kind of proprietary binary encoding for their data. For example, most relational databases have a network protocol over which you can send queries to the database and get back responses. Those protocols are generally specific to particular database, and the database vendor provides a driver (e.g., using the ODBC or JDBC APIs) that decodes responses from the database's network protocol into in-memory data structures.  
+
+So, we can see that although textual data formats such as JSON, XML, and CSV are widespread, binary encoding based on schemas are also viable option. They have a number of nice properties:  
+- They can be much more compact than various "binary JSON" variants, since they can omit field names from the encoded data.
+- The schema is a valuable form of documentation, and because the schema is required for decoding, you can be sure that it is up to date (whereas manually maintained documentation may easily diverge from reality).  
+- Keeping a database of schemas allows you to check forward and backward compatibility of schema changes, before anything is deployed.
+- For users of statically typed programming languages, the ability to generate code from the schema is useful, since it enables type checking at compile time.  
+
+In summary, schema evolution allows the same kind of flexibility as a schemaless/schema-on-read JSON database provide (see "Schema flexibility in the document model" on page 39), while also providing better guarantees about your data and better tooling.  
+
+### Modes of Dataflow
 
