@@ -247,6 +247,7 @@ The ideas on which these encodings are based are by no means new. For example, t
 Many data systems also implement some kind of proprietary binary encoding for their data. For example, most relational databases have a network protocol over which you can send queries to the database and get back responses. Those protocols are generally specific to particular database, and the database vendor provides a driver (e.g., using the ODBC or JDBC APIs) that decodes responses from the database's network protocol into in-memory data structures.  
 
 So, we can see that although textual data formats such as JSON, XML, and CSV are widespread, binary encoding based on schemas are also viable option. They have a number of nice properties:  
+
 - They can be much more compact than various "binary JSON" variants, since they can omit field names from the encoded data.
 - The schema is a valuable form of documentation, and because the schema is required for decoding, you can be sure that it is up to date (whereas manually maintained documentation may easily diverge from reality).  
 - Keeping a database of schemas allows you to check forward and backward compatibility of schema changes, before anything is deployed.
@@ -255,4 +256,95 @@ So, we can see that although textual data formats such as JSON, XML, and CSV are
 In summary, schema evolution allows the same kind of flexibility as a schemaless/schema-on-read JSON database provide (see "Schema flexibility in the document model" on page 39), while also providing better guarantees about your data and better tooling.  
 
 ### Modes of Dataflow
+
+At the beginning of this chapter we said that whenever you want to send some data to another process with which you don't shate memory - for example, whenever you want to send data over the network or write it to a file - youn need to encode it as a sequence of bytes. We then discussed a variet of different encodings for doing this.  
+
+We talked about forward and backward compatibility, which are important for evolvability (making change easy by allowing you to upgrade different parts of your sysstem independently, and not having to change everything at once). Compatibility is a relationship between one process that encodes the data, and another process that decodes it.  
+
+That's a fairly abstract idea -  there are many ways data can flow from one process to another. Who encodes the data, and who decodes it? In the rest of this chapter we will explore some of the most common ways how data flows between processes:  
+
+- Via database
+- Via service calls
+- Via asynchronous message passing
+
+### Dataflow Through Databases
+
+In a database, the process that writes to the database encodes the data, and the process that reads from the database decodes it. There may just be a single process accessing the database, in which case the reader is simply a later version of the same process - in that case you can think of storing something in the database as sending a message to your future self.  
+
+Backward compatibility is clearly necessary here; otherwise your future self won't be able to decode what you previously wrote.  
+
+In general, it's common for several different processes to be accessing a database at the same time. Those processes might be several different applications or services, or they may simply be several instances of the same service (running in parallel for scalability or fault tolerance). Either way, in an environment where the application is changing, it is likely that some processes accessing the database will be running newer code and some will be running older code - for example because a new version is currently being deployed in a rolling upgrade, so some instances have been updated whole others haven't yet.  
+
+This means that a value in the database may be written by a newer version of the code, and subsequently read by an older version of the code that is still running. Thus, forward compatibility is also often required for databases.  
+
+However, there is an additional snag. Say you add a field to a record schema, and the newer code writes a value for that new field to the database. Subsequently, an older version of the code ( which doesn't yet know about the new field) reads the record, uppdates it, and writes it back. In this situation, the desirable behavior is usually for the old code to keep the new field intact, even though it couldn't be interpreted.  
+
+The encoding formats discussed previously support such preservation of unknown fields, but sometimes you need to take care at an application level, as illustrated in Figure 4-7. For example, if you decode a database value into model objects in the application, and later reencode those model objects, this unknown field might be lost in that translation process. Solving this is not a hard problem; you just need to be aware of it.  
+
+### Different values written at different times 
+
+A database generally allows any value to be updated at any time. This means that withing a single database you may have some values that were written five miliseconds ago, and some values that were written five years ago.  
+
+When you deploy a new version of your application (of a server-side applicatoin, at least), you may entirely replace the old version with a new version within a few minutes. The sme is not true of database contents: the five-year-old data will still be there, in the original encoding, unless uou have explicitly rewritten it since then. This ovservation is sometimes summed up as data outlives code.  
+
+Rewriting (migrating) data into a new schema is certainly possible, but it's and expensive thing to do on a large dataset, so most databases avoid it if possible. Most relational databases allow simple schema changes, such as adding a new column with a null default value, without rewriting existing data. Wehn an old row is read, the database fills in nulls for any columns that are missing from the encoded data on disk. LinkedIn's document database Espresso uses Avro for storage, allowing it to use Avro's schema evolution rules.  
+
+Schema evolution thus allows the entire database to appear as if it was encoded with a single schema, even though the underlying storage may contain records encoded with varous historical versions of the schema.  
+
+### Archival storage
+
+Perhaps uou take a snapshot of your database from time to time, say for backup purposes or for loading into a datawarehouse (see "Data Warehousing" on page 91). In this case, the data dump will typically be encoded using the latest schema, even if the original encoding in the source database contained a mixture of schema versions from different eras. Since you;re copying the data anyway, you might as well encode the copy of the data consistently.  
+
+As the data dump is written in one go and is thereafter immutable, formats like Avro object containers files are a good fit. This is a good opportunity to encode the data in an analytic-friendly-column-oriented format such as Parquet.  
+
+### Dataflow Through Services: REST and RPC
+
+when you have processes that need to comummunicate over a network, there are a few different ways of arranging that communication. The most common arrangement is to have two roles: clients ans servers. The servers expose the API over the network and the clients can connect to the servers to make request to that API. The API exposed by the server is known as a service.  
+T requests to download HTTP, CSS, HTML, etc.). Because web browsers, web servers, and website authors mostly agree on these standards, you can use any web browser to acceess any website (at least in theory!).  
+
+Web browsers are not the only type of client. For example, a native app running on a mobile device or a desktio computer can also make network requests to a server, and a client-side JabaScript application running inside a web browser can use XMLHttpRequest to become an HTTP cleint (this technique is known as Ajax). In this case, the server's response is typically not HTML for displaying to a human, but rather data in an encodeing that is convenient for further processing by the clientside application code (such as JSON). Although HTTP may be used as the transport protocol, the API implemented on top is application-specific, and the transport protocol, the API implemented on top is application- specific, and the client and server need to agree on the details of that API.  
+
+Moreover, a server can itself be a client to another service (for example, a typical web app server acts as client to a database). This approach is often used to decompose a large application into smaller services by area of functionallity, such that one service makes a request to another when it requires some functionality or data from that oriented architecture (SOA), more recently refined and rebranded as microservices architecture.  
+
+In some ways, services are similar to databases: they typically allow clients to submit and query data. However, while databases allow arbitrary queries using the query language we discussed in Chapter 2, services expose an application-specific API that only allows inputs and outputs that are predetermined by the business logic (application code) of the service. This restriction provides a degree of encapsulation services can impose fine-grained restrictions on what clients can and cannot do.  
+
+A key design goal of service-oriented/microservices architecture is to make the application easier to change and maintain by making services independently deployable and evolvable. For example, each service should be owned by one team, and that team should be able to release new versions of the service frequently, without having to coordinate with other teams. In other words, we should expect old and new versions of servers and clients to be running at the same time, and so the data encoding used by servers and client must be compatible across ersions of the service API preciselly what we've been talking about in this chapter.  
+
+# Webservices 
+
+When HTTP is used as the underlying protocol for talking to the service, it is called a web service. This is perhaps a slight misnomer, because web services are not only used on the web, but in several different contexts. For example:  
+
+1. A client application running a user's device (e.g., a native app on a mobile device, or a JavaScript web app using Ajax) making requests to a service over HTTP. These requests typically go over public internet.  
+
+2. One service making requests to another service owned by the same organization, often located within the same datacenter, as part of a service-oriented/microservices architecture. (Software that supports this kind of use case is sometimes called middleware.)  
+
+3. One service making requests to service owned by a different organization, useually via the internet. This is used for data exchange between different ogranizations' backend systems. This category includes public APIs provided by online services, such as credit card processing systems, or OAutho for shared access to user data.  
+
+There are two popular approaches to web services: REST and SOAP. They are almost diametrically opposed in terms of philosophy, and often the subject of heated debate among their respective preponents.  
+
+RST is not a protocol, but rather a design philosophy that builds upon the principles of HTTP. It emphasizes simple data formats, using URLs for identifying resources and using HTTP features for cache control, authentication, and content type negotiation. REST has been gaining popularity compared to SOAP, at least in the context of cross-organizational service integration, and is often associated with microservices. An API designed according to the principles of REST is called RESTful.  
+
+... 
+
+RESTful API tend to favor simpler approaches, typically involving less code generation and automated tooling. A definition format such as OpenAPI, also known as Swagger, can be used to describe RESTful APIs and produce documentation.  
+
+# The problems with remote procedure calls (RPCs)  
+
+Web services are merely the latest incarnation of a long line of technolgies for making API requests over a network, many of which received a lot of hype but have serious problems. Enterprise JavaBeans and Java's Remote Method Invocation are limited to Java. Other lanuages/ tech have their own too.  
+
+All of these are based on the idea of a remote procedure call (RPC), which has been around since the 1970s The RPC model tries to make a request to a remote network service look the same as calling a function or method in your programming language, within the process (this abstraction is called location transparancy). Although RPC seems convenient at first, the approach is fundamentally flawed. A network request is very different from a local function call:  
+
+- A local function is predictable and either succeeds or fails, depending only on parameters that are under your control. A network request is unpredictable: the request or response may be lost due to a network problem, or the remote machine may be slow or unavailable, and such problems are entirely outside of your control. Network problems are common, so you have to anticipate them. For example by retrying a failed request. 
+- A local function call either returns a result, or throws an exception, or never returns (because it goes into an infinite loop or the process crashes). A network request has another possible outcome: it may return without a result, due to a timeout. In that case, you simply don't know what happened: if you don't get a response from the remote service, you have no way of knowing whether the request got through or not.) 
+- If you retry a failed netowrk request, it could happen that the requests are actually getting through, and only the responses are getting lost. In that case, retrying will cause the action to be performed multiple times, unless you build a mechanism for deduplication (idempotence) into the protocol. Local function calls don't have this problem.
+- Everytime you call a local function, it normally takes about the same time to execute. A network request is much slower than a fucntion call, and its latency is also widly variable: at good times it may complete in less than a milisecond, but when the network is congetsted or the remote service is overloadd it may take many seconds to do exactly the same thing.
+- When you call a local function, you can efficiently pass it references (pointers) to objects in local memory. When you make a network request, all those parameters need to be encoded into a sequence of bytes that can be sent over the network. That's okay if the parameters are primitive like numbers or strings, but quickly becomes problematic with larger objects. 
+- The client and the service may be implemented in different programming languages, so the RPC framework must translate datatypes from one lanuages into another. This can end up ugly, since not all languages have the same types = recall JavaScript's problems with numbers greater than 2^53, for example. This problem doesn't exist in a single process written in a single language.  
+
+All of these factors mean that there's no point try to make a remote service look too much like a local object in your programming language, because it's a fundamentally different thing. Part of the appeal of REST is that it doesn't try to hide the fact that it's a network protocol (although this doen't seem to stop people from building RPC libraries on top of REST).  
+
+# Current directions for RPC
+
+Despite all these problems, RPC isn't going away. Various RPC frameworks have been built on top of all the encoding mentioned in this chapter
+
 
