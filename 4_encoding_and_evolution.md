@@ -2,8 +2,7 @@
 
 Applications inevitably change over time. Features are added or modified as new products are launched, user requirements become better understood, or buisness circumsances change. In Chapter 1 we introduced the idea of evolvability: we should aim to build systemms that make it easy to adapt to change (see "Evolvability: Making Change Easy" on page 21).  
 
-In most cases, a change to an application
-s features also requires a change to data that it stores: perhaps a new field or record type needs to be captured, perhaps existing data needs to be presented in a new way.  
+In most cases, a change to an applications features also requires a change to data that it stores: perhaps a new field or record type needs to be captured, perhaps existing data needs to be presented in a new way.  
 
 The data models we discussed in Chapter 2 have different ways of coping with such change. Relational databases generally assume that all data in the database conforms to one scheme: although that schema can be changed (through schema migrations; i.e., ALTER statements), there is exactly one schema in force at any one point in time. By contrast, schema-on-read ("schemaless") datavases don't enforces a schema, so the database can contain a mixture of older and newer data formats written at different times (see "schema flexibility in the document model" on page 39).  
 
@@ -345,6 +344,101 @@ All of these factors mean that there's no point try to make a remote service loo
 
 # Current directions for RPC
 
-Despite all these problems, RPC isn't going away. Various RPC frameworks have been built on top of all the encoding mentioned in this chapter
+Despite all these problems, RPC isn't going away. Various RPC frameworks have been built on top of all the encoding mentioned in this chapter: for example, Thrift and Avro come with RPC support included, gRPC is an RPC implementation using Protocol Buffers, Finagle also uses Thrift, and Rest.li uses JSON over HTTP.  
 
+This new generation of RPC frameworks is more explicit about the far that a remote request is dfferent from a local function call. For example, Finagle and Rest.li use futures (promises) to encapsulate asynchronous actions that may fail. Futures also simplify situations where you need to make request to mulitple services in parallel, and combine their results. gRPC supports streams, where a call consists of not just one request and one response, but a series of request and responses over time.  
+
+Some of these frameworks also provide service discovery -- that is, allowing a client to find out at which IP address and port number it can find a particular service. We will return to thise topic in "Request Routing" on page 214.  
+
+Cust RPC protocols with a binary encoding format can achieve better performance that something generic like JSON over REST. However, a RESTful API has other significant advantages: it is good for experimentation and debugging (you can simply make request to it using a web brower or the command-line tool curl, without any code generation or software installation), it is supported by all mainstream programming languages and platforms, and there is a vast ecosystem of tools available (servers, caches, load balancers, proxies, firewalls, monitoring, debuggingtools, testing tools, etc.).  
+
+For these reasons, REST seems to be the predominant style for public APIs. The main focus of RPC frameworks is on requests between services owned by the same organiszation, typically within the same center.  
+
+# Data encoding and evolution for RPC
+
+For evolvability, it is important that RPC clients and servers can be changed and deployed independently. Compared to data flowing through databases (as described in the last section), we can make a simplify assumption in the case of dataflow through services: it is reasonable to assume that all the servers will be updated first and all the clients second. Thus, you only need backward compatitibility on requests, and forward compatibility on responses.  
+
+The backward and forward compatitiblity properies of an RPC scheme are inherited from whatever encoding it uses:  
+
+- Thrift, gRPC (Protocol Buffers), and Avro RPC can be evolved according to the compatibility rules of the respective encoding format.  
+
+- In SOAP, requests and responses are specified with XML schemas. These can be evolved, but there are some subtle pitfalls.  
+
+- RESTful APIs most commonly use JSON or URI-encoded/form-encoded request parameters for request. Adding optional request parameters and adding new fields to response objects are usually considered change that maintain compatibility.  
+
+Service compatibility is made harder by the fact that RPC is often uesd for communication across organizational boundaries, so the provider of a service often has no control over its clients and cannot force them to ugrade. Thus, compatibility needs to be maintained for a long time, perhaps indefinitely. If a compatibility-breaking change is requried, the service provider often ends up maintaining multiple versions of the service ApI side by side.  
+
+There is no agreement on how API versioning should work (i.e, how a client can indicate which version of the API it wants to use). For RESTful APIs, common approaches are to use a version number in the URL or in the HTTP Accept header. For service that use API keys to identify a particular cleint, another option is to store a client's requested API version on the server and to allow this version selection to be updated through a seperate administrative interface.  
+
+# Message-Passing Dataflow
+
+We have been looking at the different ways encoded data flows from one process to another. So far, we've discussed REST and RPC (where one process sends a request over the network to another process and expects a response as quickly as possble), and databases (where one process writes encoded data, and another process reads it again sometime in the future).  
+
+In this section, we will briefly look at asynchronous message-passing systems, which are somewhere between RPC and databases. They are simliar to RPC in that a client's request (usually called a message) is delivered to another process with a low latency. They are similar to databases in that the message is not sent via a direct network connection, but goes via an intermediary called a message broker (also called a message que or message-oriented middleware), which stores the message tamporarily.  
+
+Using a message broker has several advantages compared to direct RPC:  
+
+- It can act as a buffer if the recipient is unavailable or overloaded, and thus improve system reliability.  
+- It can automatically redeliver messages to a process that has crashed, and thus prevent messages from being lost.  
+- it avoids the sender needing to know the IP address and port number of the recipient (which is particuarly useful in cloud deployment where virtual machines often come and go).  
+- It allows one message to be sent to several recipients.  
+- It logically decouples the sender from the recipient (the sender just publishes messages and doesn't care who consumes them).  
+
+However, a differece compared to RPC is that message-passing communication is usually one-way: a sender normally doesn't expect to recieve a reply to its messages. It is possible for a process to send a response, but this would usually be done on a separate channel This communication pattern is asynchronous: the sender doesn't wait for the message to delivered, but simply sends it and then forget about it.  
+
+# Message brokers
+
+In the past, the landscape of message brokers was dominated by commercial enterprise software from companies. More recently, open source software such as RabbitMQ, and Apache Kafka have become popular. We will compare them in more detail in Chapter 11.  
+
+The detailed delivery semantics vary by implmentation and configuration, but in general, message brokers are used as follows: one process sends a message to a named queue or topic, and the broker ensures that the message is delivered to one or more consumers of or suscribers to that queue or topic. There can be many producers and many consumers on the same topic.  
+
+A topic provides only one-way dataflow. However, a consumer may itself pubish messages to another topic (so you can chain them together, as we shall see in Chapter 11), or to reply a queue that is consumed by the sender of the original message (allowing a request/response dataflow, similar to RPC).  
+
+Message brokers typically don't enforce any particular data model -- a message is just a sequence of bytes with some metadata, so you can use any encoding format. If the encoding is backward and forward compatible, you have the greatest flexibility to change publishers and consumers independently and deploy them in any order.  
+
+If a consumer republishes messages to another topic, you may need to be careful to preserve unknown fields, to prevent this issue described previously in the context of databases.  
+
+# Distrubuted actor frameworks 
+
+The actor model is a programming model for concurrency in a single process. Rather than dealing directly with threads (and the associated problems of race conditions, locking, and deadlock), logic is encapsulated in actors. Each actor typically represents one client or entity, it may have some local state (which is not shared with any other actor), and it communicates with other actors by sending and receiving asynchronous messages. Message delivery is not guaranteed: in certain error scenarios, messages will be lost. Since each actor process only one message at time, it doesn't need to worry about threads, and each actor can be scheduled independently by the framework.  
+
+In distributed actor frameworks, this programming model is used to scale an application across multiple nodes. The same message-passing mechanism is used, no matter whether the sender and recipient are on the same node or different nodes. If they are on different nodes, the message is transparently encoded into a byte sequence, sent over the network, and decoded on the other side.  
+
+Location transparency works better in the actor model than in RPC, because the actor model already assumes that messages may be lost, even within a single process. Although latency over the network is likely higher than within the same process, there is less of a fundamental mismatch between local and remote communication when using the actor model.  
+
+A distributd actor framework essentially integrates a message broker and the actor prograrmming model into a single framework. However, if you want to perform rolling upgrades of your actor-based application, you still have to worry about forward and backward compatibility, as messages may be sent from a node running the new version to a node running the old version, and vice versa.  
+
+Three popular distributed actor frameworks handle message encoding as follows:  
+
+- Akka uses Java's built-in serialization by default, which does not provide forward or backward compatibility. However, you can replace it with something like Protocol Buffers, and thus gain the ability to do rolling upgrades.  
+
+- Orleans by default uses a custom data encoding format that does not support rolling upgrade deployment; to deploy a new version of your application, you need to set up a new cluster, move traffic from the old cluster to the new one, and shut down the old one. Like with Akka, custom serialization plug-ins can be used
+
+- In Erlang OTP it is surprisingly hard to make changes to record schemas (despite the system having many feature designed for high availability); rolling upgrades are possible but need to be planned carefully. An experimental new maps datatype (a JSON-like structure, introduced in Erlang R17 in 2014) may make this easier in the future.  
+
+# Summary
+
+In this chapter we looked at several ways of turning data structures into bytes on the network or bytes on disk.  We saw how the details of these encoding affect not only their efficiency, but more importantly also the architecture of applications and your options for deploying them.  
+
+In particular, many services need to support rolling upgrades, where a new version of a service is gradually deployed to a few nodes at a time, rater than deploying to all nodes simultaneously. Rolling upgrades allow new versions of service to be released without downtime (thus encouraging frequent small releases over rare big releases) and make deployment less risky (allowing faulty releases to be detected and rolled back before they affect a large number of users). These properties are hugely benificial for evolvability, the ease of making changes to an application.  
+
+During rolling upgrades, or for various other reasons, we must assume that different nodes are running the different versions of our application's code. Thus, it is important that all data flowing around the system is encoded in a way that provides backwards conpatibility (old code can read new data).  
+
+We discussed several data encoding formats and their compatibility properties:  
+
+- Programming language-specific encodings are restricted to a single programming language and often fail to provide forward and backward compatibility.  
+
+- Textual formats like JSON, XML, and CSV are widespread, and their compatibility depends on how you use them. They have optional schema languages, which are sometimes helpful and sometimes a hindrance. These formats are somewhat vague about datatypes, so you have to be careful with things like numbers and binary strings.  
+
+- Binary schema-driven formats like Thrift, Protocol Buffers, and Avro allow compact, efficient encoding with clearly defined forward and backward compatibility semantics. The schemas can be useful for documentation and code generation in statically typed languages. However, they have the downside that data needs to be decoded before it is human-readable.  
+
+We also discussed several modes of dataflow, illustrating different scenarios which data encoding are important:  
+
+- Databases, where the process writing to the database encodes the data and the process reading from the database decodes it
+
+- RPC and REST APIs, where the client encodes a request, the server decodes the request and encodes a response, and the client finally decodes the response
+
+- Asynchronous message passing (using message brokers or actors), where nodes communicate by sending each other messages that are encoded by the sender and decoded by the recipient
+
+We can conclude that with a bit of care, backward/forward compatibility and rolling upgrades are quite achievable. May your application's evolution be rapid and your deployment be frequent.  
 
