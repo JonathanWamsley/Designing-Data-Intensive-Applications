@@ -74,7 +74,7 @@ Any node in the system can go down, perhaps unexpectedly due to a fault, but jus
 
 How do you achieve high availability with leader-based replication?  
 
-### Folwer failure: Catch-up recovery
+### Folower failure: Catch-up recovery
 
 On its local disk, each follower keeps a log of the data changes it has received from the leader. If a follower crashes and is restarted, or if the network between the leader and the followers is temporarily interrupted, the follower can recover quite easily from its log, it knows the last transaction that was processed before the fault occured. Thus, the follower can connect to the leader and request all the data changes that occured during the time when the follower was disconnected. When it has applied these changes as before.  
 
@@ -110,3 +110,61 @@ How does leader-based replication work under the hood? Several different replica
 
 ### Statement-based replication  
 
+In the simplest case, the leader logs every write request (statement) that is executes and sens that statemetn log to its followers. For a relational database, this means that every INSERT, or DELETE statement is forwarded to followers, and each follower parse and executes that SQL statement as if it had been received from a client.  
+
+Althought this may sound reasonable, there are various ways in which this approach to replication can break down:  
+
+- Any statement that calls a nondeterministic function, such as NOW() to get the current date and time or RAND() to get a random number, is likely to generate different value on each replica.  
+
+- If statements use an autoincrementing column, or if they dependo n the existing data in the database (e.g., UPDATE ... WHERE... or some other condition). they myst be executed in exactly the same order on each replica, or else they mayhave a different effect. This can be limiting when there are multiple concurrently executing transations.  
+
+- Statements that have side effects(e.g., triggers, stored procedures, user-defined fucntions) may result in different side effects occurring on each replica, unless the side effects are absolutely deterministic.  
+
+It is possible to work around those issues -- for example, the leader can replace any nondeterministic function calls with a fixed redturn value when the statement is logged so that the followers all get the same value. However, because there are so many edge cases, other replication methods are now generally preferred.  
+
+Statement-based replication was used in MySQL before version 5.1. It is still sometimes used today, as  it is quite compact, but by default MySQL now switches to rowbased replication if there is any nondeterminism in a statement. VoltDB uses satement-based replication, and makes it safe by requiring transactions to be deterministic.  
+
+### Write-ahead log (WAL) shipping
+
+In Chapter 3 we discussed how storage engines represent data on disk, and we found that usually every write is appended to a log:  
+
+- In the case of a log-structured storage engine(see "SSTables and LSM-Trees" on page 76), this log is the main place for storage. Log segments are compacted and garbage-collected in the background.  
+
+- In the case of a B-tree, which overwrites individual disk blocks, every modification is first written to a write-ahead log so that the index can be restored to a consistent state after a crash.  
+
+In either case, the log is an append-only sequence of bytes containing alll writes to the database. We can use the exact same log to build a replica on another node: besides writting the log to disk, the loeader also sends it across the network to its followers.  
+
+When the follower process this log, it builds a copy of the exact same data structures as found on the leader.  
+
+This method of replication is used in PostgreSQL and Oracle, among others. The main disadvantage is that the log describes the data on a very low level: a WAL contains details of which bytes were changed in which disk blocks. This makes replication closely coupled to the storage engine. If the database changes its storage format from one version to another, it is typically not possible to run different versions of the database software on the leader and the followers.  
+
+That may seem like a minor implementation detail, but it can have a big operation impact. If the replication protocol allows the followers to use a newer software version than the leader, you can perform a xzero-downtime upgrade of the database software by first upgrading the followers and then performing a failover to make one of the upgrades nodes the new leader. If the replication protocol does not allow this version mismatch, as often the case with WAL shipping, such upgrades require downtime.  
+
+### Logic(row-based) log replication
+
+An alternative is to use different log formats for replication and for the storage engine, which allows the replication log to be decoupled from te storage engine internals. This kind of replication log is called a logical log, to distinguish it from the storage engine's (physical) data representation.  
+
+A logical log for a relational database is usually a sequence of records describing writes to database tables at the granularity of a row:  
+
+- For an inserted row, the log contains the new values of all columns.  
+- For a deleted row. the log contains enough information to uniquely identify the row that was deleted. Typically this would be the primary key, but if there is no primary key on the table, the old values of all columns need to be logged.  
+
+- For an updated row, the log contains enough information to uniquely identify the updated row, and the new values of all columns (or at least the new values of all columns that changed).  
+
+A transaction that modifies several rows generates several such log records. followed be a record indicating that the transaction was commited. MySQL's binlog (when configured to use row-based replication) uses this approach.  
+
+Since a logical log is decoupled from the storage engine internals, it can more easily be kept backward compatible, allowing the leader and the follower to run different versions of the database software, or even different storage engines.  
+
+A logical log format is also easier for external applications to parse. This aspect is useful if you want to send the contents of a database to an external system, such as a datawarehouse for offline analysis, or for building custom indexes and caches. This technique is called change data capture, and we will return to it in Chapter 11.  
+
+### Triger-based replication
+
+The replication approaches described so far are implemented by the database system, without involving any application code. In many cases, that's what you want --but there are some circumstances where more flexibility is needed. For example, if you want to only replicate a subset of the data, or want to replicate from one kind of database to another, or if you need conflict resolution logic , then you may need to move replication up to the application layer.  
+
+Some tools, such as Oracle GoldenGate, can make data changes available to an application by reading the database log. An alternative is to use features that are available in many relational databases: triggers and stored procedures.  
+
+A trigger lets you register custom application code that is automatically executed when a data changes (write transaction) occurs in a database system. The trigger has the opportunity to log this change into a separate table, from which it can read by an external process. That external process can then apply any necessary application logic and replicate the data change to another system. Databus for Oracle and Bucardo for Postgres works like this, for example.  
+
+Triger-based replication typically has greater overheads that other replication methods, and it more prone to bugs and limitations than the databases's built-in replication. However, it can nevertheless be useful due to its flexibility.  
+
+### Problems with replication Lag
