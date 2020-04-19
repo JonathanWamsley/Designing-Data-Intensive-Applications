@@ -70,35 +70,43 @@ The practical steps of setting up a follower vary significantly by database. In 
 
 # Handling Node Outages
 
+Any node in the system can go down, perhaps unexpectedly due to a fault, but just as likely do to planned maintenance (for example, rebooting a machine to install a kernel security patch.) Being able to reboot individual nodes without downtime is a big advantage for operations and maintenance. Thus, our goal is to keep the system as a whole running despite node failures, and to keep the impact of a node outage as small as possible.  
 
+How do you achieve high availability with leader-based replication?  
 
+### Folwer failure: Catch-up recovery
 
+On its local disk, each follower keeps a log of the data changes it has received from the leader. If a follower crashes and is restarted, or if the network between the leader and the followers is temporarily interrupted, the follower can recover quite easily from its log, it knows the last transaction that was processed before the fault occured. Thus, the follower can connect to the leader and request all the data changes that occured during the time when the follower was disconnected. When it has applied these changes as before.  
 
+### Leader failure: Failover
 
+Handling a failure of the leader is trickier: one of the followers needs to be promoted to the new leader, clients need to be reconfigured to send their writes to the new leader, and the other followers need to start consuming data changes from the new leader. This process is called failover.  
 
+Failover can happen manually (an administrator is notified that the leader has failed and takes the necessary steps to make a new leader) or automatically. An automatic failover process usually consists of the following steps:  
 
+1. Determining that the leader has failed. There are many things that could potentially go wrong: crashes, power outages, network issues, and more. There is no foolproof way of detecting what has gone wrong, so most systems simply use a timeout: nodes frequently bounce messages back and forth between each other, and if a node doesn't respond for some period of time -- say, 30 seconds-- it is assumed to be dead. (If the leader is deliberately taken down for planned maintenance, this doesn't apply.)
 
+2. Choosing a new leader. This could be done through an election process (where the leader is chosen by a majority of the remaining replicas), or a new leader could be appointed by a previously elected controller node. The best candidate for leadership is usually the replica with the most up-to-date changes from the old leader (to minimize any data loss). Getting all the nodes to agree on a new leader is a consensus problem, discussed in detail in Chapter 9.
 
+3. Reconfiguring the system to use the new leader. Clients now need to send thier write reqyest to the new leader (we discuss this in "Request Routing" on page 214). If the old leader comes back, it might still believe that it is the leader, not realizing that the other replicas have forced it to step down. The system needs to ensure that the old leader becomes a folllower and recognizes the new leader.  
 
+Failover is fraught with things that can go wrong:  
 
+- If asynchronous replication is used, the new leader may not have received all the writes from the old leader before it failed. If the former leader rejoins the cluster after a new leader has been chosen, what hsould happen to those writes? The new leader may have received conflicting writes in the meantime. The most common solution is for the old leader's unreplicated writes to simply be discarded, which may violate clients' durability expectations.  
 
+- Discarding writes is especially dangerous if other storage systems outside of the database need to be coordinated with the database contents. For example in one incident at GitHub, an out-of-date MySQL follower was promoted to leader. The database used an autoincrementing counter to assign primary keys to new rows, but because the new leader's counter lagged behind the old leader's, it reused some primary keys that were previously assigned by the old leader. These primary keys were also used in a Redis store, so the reuse of primary keys resulted in inconsistency between MySQL and Redis, which cause some private data to be disclosed to the wrong users.  
 
+- In certain fault scenarios (see Chapter 8), it could happen that two nodes both beleive that they are the leader. This situation is called split brain, and it is dangerous: if both leaders accept writes, and there is no process for resolving conflicts, data is likely to be lost or corrupted. As a safety catch, some systems have a mechanism to shut down one node if two leaders are detected. However, if this mechanism is not carefully designed, you can end up with both nodes being shut down.  
 
+- What is the right timeout before the leader is declared dead? A long timeout means a longer time to recovery in the case where the leader fails. However, if the timeout is too short, there could be unecessary failovers. For example, a temporary load spike could cause  node's response time to increase above the timeout or a network glitch could cause delayed packets. If the system is already struggling with high load or network problems, an unnecessary failover is likely to make the situation worse, not better.  
 
+There are no easy solutions to these problems. For this reason, some operations eams prefer to perform failover manually, even if the software supports automatic failover.  
 
+These issues -- node failures; unreliable networks; and trade-offs around replica consistency, durability, availability, and latency -- are in fact fundamental problems in distributed systems. In Chapter 8 and Chapter 9 we discuess them in greater depth.  
 
+### Implementation of Replication logs
 
+How does leader-based replication work under the hood? Several different replication methods are used in practice, so let's look at each one briefly.  
 
-
-
-
-
-
-
-
-
-
-
-
-
+### Statement-based replication  
 
