@@ -330,6 +330,94 @@ In principle, you could make the conflict detection synchronous --i.e., wait for
 
 The simplest strategy for dealing with conflicts is to avoid them: if the application can ensure that all writes for a particular record go through the same leader, then conflicts cannot occur. Since many implementations of multi-leader replication handle conflicts quite poorly, avoiding conflicts is a frequently recommended approach.  
 
+For example, in an application where a user can edit their own data, you can ensure that requests from a particular user are always routed to the same datacenter and use the leader in that datacenter for reading and writing. Different users may have different "home" datacenters (perhaps picked based on geographic proximity to the user), but from anyone user's point of view the coniguration is essentiallu single-leader.  
+
+However, sometimes you might want to change the designated leader for a record--perhaps because one datacenter has failed and you need to reroute traffic to another datacenter, or perhaps because a user has movd to a different location and is now closer to a different datacenter. In this situation, conflict voidance breaks down, and you have to deal with the possiblity of concurrent writes on different leaders.  
+
+### Converging toward a consistent state
+
+A single-leader database applies writes in a sequential order: if there are several updates to the same field, the last write determines the final value of the field.  
+
+In a multi-leader configuration, there is no defined ordering of writes, so it's not clear what the final value should be. In Figure 5-7, at leader 1 the title is first updated to B and then to C; at leader 2 it is first updated to C and then to B. Neither order is "more correct" than the other.  
+
+If each replica simply applied writes in the order that it saw the writes, the database would end up in and inconsitent state: the final value would be C at leader 1 and B at leader 2. That is not acceptable --every replication scheme must ensure that the data is eventually the same in all repllicas. Thus, the database must resolve the onflict in a convergent way, which means that all replicas must arrive at the same final value when all changes have been replicated.  
+
+There are various ways of achieving convergent conflict resolutions:  
+
+- Give each write a unique ID (e.g., a timestamp, a long random number, a UUID, or a hash of the key and value), pick the write with the highest ID as the winner, and throw away the other writes. If a timestamp is used, this technique is known as last write wins (LWWW). Although this approach is popular, it is dangerously prone to data loss. We will discuss LWW in more details at the end of this chapter.  
+
+- Give each replica a unique ID, and let writes that originated at a higher-numbered replica always take precedence over writes that originatd at a lower-numvered replica. This approach also implies data loss.  
+
+- Somehow merge the values together--e.g., order them alphabetically and then concatenate them (in Figure 5-7, the merged title might be something like "B/C").  
+
+- Record the conflict in an explicit data structure that preserves all information, and write application code that resolves the conflict at some later time (perhaps by prompting the user).  
+
+### Customer conflict resolution logic  
+
+As the most appropriate way of resolving a conflict may depend on the application, most multi-leader replication tools let you write conflict resolution logic using application code. That code may be executed on write or on read:  
+
+On write:  
+    - As soon as the database system detects a conflict in the log of replicated changes, it calls the confluct handler. For example, Bycardo allows you to write a snippet of Perl for this purpose. This handler typically cannot prompt a user -- it runs in a backgroun process and it must execute quickly.  
+      
+On Read:  
+    - When a conflict is detected, all the conflicting writes are stored. The next time the data is read, these multiple versions of the data are returned to the application. The application may prompt the user or automatically resolve the conflit, and write the result back to the database. CouchDB works this way for, for example.  
+    
+Note that conflict resolution usally applies at the level of an individual row or document, not for an entire transaction. Thus , if you have a transaction that atomically makes several different writes, each write is still considered separately for the purpose of conflict resolution.  
+
+### Automatic conflict resolution
+
+Conflict resolution rules can quickly become complicated, and custom cose can be error-prone. Amazon is frequently cited example of surprising effects due to a conflict resolution handler: for some time, the confluct resoluation logic on the shopping cart would preserve items added to the cart, but not items removed from the cart. Thus, customers would sometimes see items reappearing in their carts even though they had previously been removed.  
+
+There has been some interesting research into automatically resolving conflicts caused by concurrent data modification. A few lines of research are worth mentioning:  
+
+- Conflict-free replicated datatypes are family of data structures for sets, maps, ordered lists , counters, etc. that can concurrentlu edited by multiple users, and which automatically resolve conflicts in sensible ways. Some have been implemented in Riak
+- Mergeabke persistent data structures
+- operational transformations
+
+Implementations of these algorithms in databases are still young, but it's likely that they will integrated into more replicated data systems in the future. Automatic conflict resolution could make multi-leader data synchronization much simpler for applications to deal with.  
+
+### What is conflict?
+
+Some kinds of conflicts are obvious. In example in Figure 5-7, two writes concurently modified the same field in the same record, setting it to two different values. There is little douby that this is a conflict.  
+
+Other kinds of conflict can be more subtle to detect. For example, consider a meeting room booking system: it tracks which room is booked by which group of people at which time. This application needs to ensure that each room is only booked by one group of people at any one time (i.e., there must not be any overlapping bookings for the same room). In this case, a conflict may arise if two different bookings are created for the same room at the same time. Even if the application checks availability before allowing a user to make a booking, there can be a conflict if the two bookings are made on two different leaders.  
+
+There isn't a quick read-made answer, but in the following chapters we will trace path toward a good understanding of this problem. We will see some more examples of conflicts in chapters 7, and chapter 12 we will discuss scalable approaches for detecting and resolving conflicts in a replicated system.  
+
+### Multi-leader Replication Topologies
+
+A replication topology describes the communcation paths along which writes are propagated from one node to another. If you have two leaders, like in Figure 5-7, there is only one plausible topology: keader 1 must send all of its writes to leader 2, and vice versa. With more than two leaders, various different topologies are possible.  
+
+The most general topology is all-to-all, in which every leader sends its writes to every other leader. However, more restricted topologies are also used: for example, MySQL by default supports only a circular topology, in which each node receives writes from one node and forwards those writes (plus any writes of its own) to one other node. Another popular topology has the shape of a start. One designated root node forwards writes to all of the other nodes. The star topology can be generalized to a tree.  
+
+In circular and star topologies, a write may need to pass through several nodes before it reaches all replicas. Therefore, nodes need to forward data changes they received from other nodes. To prevent infinite replication loops, each node is given a unique identifier, and in the replication log, each write is tagged with the identifiers of all the nodes it has passed through. When a node receives a data change that is tagged with its own identifier, that data cange is ignored, because the node knows that it has already been processed.  
+
+A problem with circular and star topologies is that if just one node fails, it can interrupt the flow of replication messages between other nodes, causing them to be unable to communicate until the node is fixed. The topology could be reconfigured to work around the failed node, but in most deployments such reconfiguration would have to be done manually. The fault tolerance of a more desnely connected topology (such as all-to-all) is better because it allows messages to travel along different paths, avoiding a single point of failure.  
+
+On the other hand, all-to-all topologies can have issues too. In particular, some network links may be faster than others (e.g., due to network congestion), with the result that some replication messages may "overtake" others, as illustrated in Figure 5-9.  
+
+In Figure 5-9, client A inserts a row into a table on leader 1, and client B updates that row on leader 3. However, leader 2 may reeive the writes in different order: it may first recive the update (which from its point of view, is an update to a row that does not exist in the database) and only later receive the corresponding insert (which should have preceded the update).  
+
+This is a problem of causality, similar to the one we saw in "Consistent Prefix Reads" on page 165: the update depends on the prior insert, so we need to make sure that all nodes process the insert first, and tehn the update. Simply attaching a timestamp to every write is not sufficient, because clcks cannot be trusted to be sufficiently in sync to correctly order these events at leader 2.  
+
+To order these events correctly, a technique called version vectors can be used, which we will discuss later in this chapter. However, conflict detection techniques are poorly implemented in many multi-leader relication systems. For example, at the time of writing, postgreSQL, BDR does not provide causal order of writes, and Tungsten Replicator for MySQL doesn't even try to detect conflicts.  
+
+If you are using a system with multi-leader replication, it is worth being aware of these issues, carefully reading the documentation, and thoroughly testing your database to ensure that it really does provide the guarantees you beleive it to have.  
+
+### Leaderless Replication  
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
